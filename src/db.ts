@@ -13,13 +13,24 @@ function appleTimeToDate(raw: string): Date {
   return new Date(APPLE_EPOCH_MS + seconds * 1000);
 }
 
-function extractText(text: string, attributedBodyBase64: string): string {
+function decodeAttributedBodyHex(hex: string): string {
+  if (!hex) return "";
+  const buffer = Buffer.from(hex, "hex");
+  const utf8 = buffer.toString("utf8").replace(/\u0000/g, " ");
+  const nsStrings = [...utf8.matchAll(/NSString\s+([^\u0086]+?)(?=\s{2,}|__kIM|NSDictionary|$)/g)]
+    .map((match) => match[1]?.trim())
+    .filter((value): value is string => Boolean(value && value.trim()));
+  if (nsStrings.length > 0) {
+    const longest = nsStrings.sort((a, b) => b.length - a.length)[0];
+    if (longest) return longest;
+  }
+  return utf8.replace(/\s+/g, " ").trim();
+}
+
+function extractText(text: string, attributedBodyHex: string): string {
   if (text?.trim()) return text.trim();
-  if (!attributedBodyBase64) return "";
-  const raw = Buffer.from(attributedBodyBase64, "base64").toString("utf8");
-  const cleaned = raw.replace(/\u0000/g, " ").replace(/\s+/g, " ").trim();
-  const nsStringMatch = cleaned.match(/NSString\s+(.+?)(?:\u0086|$)/);
-  return (nsStringMatch?.[1] || cleaned).trim();
+  const decoded = decodeAttributedBodyHex(attributedBodyHex);
+  return decoded.length > 5000 ? decoded.slice(0, 5000) : decoded;
 }
 
 function withReadableCopy<T>(dbPath: string, fn: (safeDbPath: string) => T): T {
@@ -81,8 +92,7 @@ ORDER BY m.date ASC;
     const rows = JSON.parse(output) as Array<Record<string, string | number>>;
     return rows.flatMap((row) => {
       const attributedHex = String(row.attributed_body_hex || "");
-      const attributedBodyBase64 = attributedHex ? Buffer.from(attributedHex, "hex").toString("base64") : "";
-      const text = extractText(String(row.text || ""), attributedBodyBase64);
+      const text = extractText(String(row.text || ""), attributedHex);
       const hadAttachments = Number(row.attachment_count || 0) > 0;
       if (!options.includeEmpty && !text && !hadAttachments) return [];
       const participants = String(row.participant_handles || "")

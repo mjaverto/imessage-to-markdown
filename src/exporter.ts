@@ -1,45 +1,34 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { fetchMessages } from "./db.js";
-import { groupMessagesByChatDay, renderMarkdown } from "./formatting.js";
-import { ExportOptions, ExportResult } from "./types.js";
-import { looksLikeSystemChat, sanitizeFilename } from "./utils.js";
+import { iMessageAdapter } from "./adapters/imessage.js";
+import { signalAdapter } from "./adapters/signal.js";
+import { telegramAdapter } from "./adapters/telegram.js";
+import { whatsappAdapter } from "./adapters/whatsapp.js";
+import { renderConversationDays } from "./core/render.js";
+import { ExportAdapter } from "./core/model.js";
 
-export function exportMarkdown(options: ExportOptions): ExportResult {
-  const rawMessages = fetchMessages({
-    dbPath: options.dbPath,
-    start: options.start,
-    end: options.end,
-    myName: options.myName,
-    includeEmpty: options.includeEmpty,
-  });
+const adapters = new Map<string, ExportAdapter>([
+  [iMessageAdapter.source, iMessageAdapter],
+  [telegramAdapter.source, telegramAdapter],
+  [whatsappAdapter.source, whatsappAdapter],
+  [signalAdapter.source, signalAdapter],
+]);
 
-  const pattern = options.excludeChatRegex ? new RegExp(options.excludeChatRegex) : undefined;
-  const filtered = rawMessages.filter((message) => {
-    const title = message.chatDisplayName || message.participants.join(", ");
-    if (pattern?.test(title || "")) return false;
-    if (options.skipSystem && looksLikeSystemChat(title, message.participants)) return false;
-    return true;
-  });
-
-  const grouped = groupMessagesByChatDay(filtered);
+export async function exportFromSource(source: string, options: Record<string, unknown>): Promise<{ filesWritten: number; outputPaths: string[] }> {
+  const adapter = adapters.get(source);
+  if (!adapter) throw new Error(`Unknown source: ${source}`);
+  const outputDir = String(options.outputDir || "./exports");
+  const conversations = await adapter.loadConversations(options);
   const outputPaths: string[] = [];
-
-  fs.mkdirSync(options.outputDir, { recursive: true });
-
-  for (const chatDay of grouped) {
-    const dayDir = path.join(options.outputDir, chatDay.dateKey);
-    fs.mkdirSync(dayDir, { recursive: true });
-    const filename = `${sanitizeFilename(chatDay.chatTitle, chatDay.chatKey)}.md`;
-    const fullPath = path.join(dayDir, filename);
-    fs.writeFileSync(fullPath, renderMarkdown(chatDay), "utf8");
-    outputPaths.push(fullPath);
+  fs.mkdirSync(outputDir, { recursive: true });
+  for (const conversation of conversations) {
+    for (const rendered of renderConversationDays(conversation)) {
+      const fullPath = path.join(outputDir, rendered.relativePath);
+      fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+      fs.writeFileSync(fullPath, rendered.content, "utf8");
+      outputPaths.push(fullPath);
+    }
   }
-
-  return {
-    filesWritten: outputPaths.length,
-    messagesExported: filtered.length,
-    outputPaths,
-  };
+  return { filesWritten: outputPaths.length, outputPaths };
 }

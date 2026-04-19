@@ -7,7 +7,8 @@ import { execFileSync } from "node:child_process";
 import prompts from "prompts";
 import { Command } from "commander";
 
-import { InstallOptions } from "./types.js";
+import { AppConfig, CONFIG_VERSION, validateSchedule } from "./config.js";
+import { runDoctor } from "./doctor.js";
 import { expandHome } from "./utils.js";
 
 const DEFAULT_INSTALL_DIR = path.join(os.homedir(), ".imessage-to-markdown");
@@ -16,51 +17,35 @@ const DEFAULT_DB = path.join(os.homedir(), "Library", "Messages", "chat.db");
 const LABEL = "ai.aver.to.imessage-to-markdown";
 
 function buildRunnerScript(configPath: string): string {
-  const configRef = "${CONFIG_PATH}";
-  const installDirRef = "${INSTALL_DIR}";
-  const outputDirRef = "${OUTPUT_DIR}";
-  const dbPathRef = "${DB_PATH}";
-  const myNameRef = "${MY_NAME}";
-  const excludeRegexRef = "${EXCLUDE_REGEX}";
-  const includeSystemRef = "${INCLUDE_SYSTEM}";
-  const includeEmptyRef = "${INCLUDE_EMPTY}";
-  const runQmdRef = "${RUN_QMD}";
-  const qmdCommandRef = "${QMD_COMMAND}";
-  const cmdRef = '"${CMD[@]}"';
-  return [
-    "#!/bin/zsh",
-    "set -euo pipefail",
-    `CONFIG_PATH=${JSON.stringify(configPath)}`,
-    `INSTALL_DIR=$(dirname "${configRef}")`,
-    `if [[ ! -f "${configRef}" ]]; then`,
-    `  echo "Missing config: ${configRef}" >&2`,
-    "  exit 1",
-    "fi",
-    `if /usr/bin/jq -e '.acPowerOnly == true' "${configRef}" >/dev/null 2>&1; then`,
-    '  if pmset -g batt | head -n 1 | grep -q "Battery Power"; then',
-    '    echo "On battery power, skipping export"',
-    '    exit 0',
-    '  fi',
-    'fi',
-    `OUTPUT_DIR=$(/usr/bin/jq -r '.outputDir' "${configRef}")`,
-    `DB_PATH=$(/usr/bin/jq -r '.dbPath' "${configRef}")`,
-    `MY_NAME=$(/usr/bin/jq -r '.myName' "${configRef}")`,
-    `EXCLUDE_REGEX=$(/usr/bin/jq -r '.excludeChatRegex // empty' "${configRef}")`,
-    `INCLUDE_SYSTEM=$(/usr/bin/jq -r '.includeSystem' "${configRef}")`,
-    `INCLUDE_EMPTY=$(/usr/bin/jq -r '.includeEmpty' "${configRef}")`,
-    `RUN_QMD=$(/usr/bin/jq -r '.runQmdEmbed' "${configRef}")`,
-    `QMD_COMMAND=$(/usr/bin/jq -r '.qmdCommand // empty' "${configRef}")`,
-    `cd "${installDirRef}"`,
-    `CMD=(node dist/cli.js --output-dir "${outputDirRef}" --db-path "${dbPathRef}" --my-name "${myNameRef}")`,
-    `if [[ -n "${excludeRegexRef}" ]]; then CMD+=(--exclude-chat-regex "${excludeRegexRef}"); fi`,
-    `if [[ "${includeSystemRef}" == "true" ]]; then CMD+=(--include-system); fi`,
-    `if [[ "${includeEmptyRef}" == "true" ]]; then CMD+=(--include-empty); fi`,
-    cmdRef,
-    `if [[ "${runQmdRef}" == "true" && -n "${qmdCommandRef}" ]]; then`,
-    `  eval "${qmdCommandRef}"`,
-    'fi',
-    '',
-  ].join("\n");
+  return `#!/bin/zsh
+set -euo pipefail
+CONFIG_PATH=${JSON.stringify(configPath)}
+if [[ ! -f "$CONFIG_PATH" ]]; then
+  echo "Missing config: $CONFIG_PATH" >&2
+  exit 1
+fi
+node --input-type=module <<'EOF'
+import fs from "node:fs";
+import { execFileSync } from "node:child_process";
+const config = JSON.parse(fs.readFileSync(process.env.CONFIG_PATH, "utf8"));
+if (config.acPowerOnly) {
+  const power = execFileSync("pmset", ["-g", "batt"], { encoding: "utf8" });
+  if (power.includes("Battery Power")) {
+    console.log("On battery power, skipping export");
+    process.exit(0);
+  }
+}
+process.chdir(config.repoDir);
+const args = ["dist/cli.js", "--output-dir", config.outputDir, "--db-path", config.dbPath, "--my-name", config.myName];
+if (config.excludeChatRegex) args.push("--exclude-chat-regex", config.excludeChatRegex);
+if (config.includeSystem) args.push("--include-system");
+if (config.includeEmpty) args.push("--include-empty");
+execFileSync("node", args, { stdio: "inherit" });
+if (config.runQmdEmbed && config.qmdCommand) {
+  execFileSync("bash", ["-lc", config.qmdCommand], { stdio: "inherit" });
+}
+EOF
+`;
 }
 
 function buildPlist(scriptPath: string, hour: number, minute: number): string {
@@ -74,6 +59,11 @@ function buildPlist(scriptPath: string, hour: number, minute: number): string {
     <array>
       <string>${scriptPath}</string>
     </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+      <key>CONFIG_PATH</key>
+      <string>${path.join(DEFAULT_INSTALL_DIR, "config.json")}</string>
+    </dict>
     <key>StartCalendarInterval</key>
     <dict>
       <key>Hour</key>
@@ -92,34 +82,72 @@ function buildPlist(scriptPath: string, hour: number, minute: number): string {
 `;
 }
 
-function ensureJq(): void {
-  try {
-    execFileSync("/usr/bin/jq", ["--version"], { stdio: "ignore" });
-  } catch {
-    throw new Error("jq is required for the generated launchd runner script. Install jq first.");
-  }
-}
-
-function writeInstallFiles(options: InstallOptions): { configPath: string; scriptPath: string; plistPath: string } {
-  fs.mkdirSync(options.installDir, { recursive: true });
-  const configPath = path.join(options.installDir, "config.json");
-  const scriptPath = path.join(options.installDir, "run-export.sh");
+function writeInstallFiles(config: AppConfig): { configPath: string; scriptPath: string; plistPath: string } {
+  fs.mkdirSync(config.installDir, { recursive: true });
+  const configPath = path.join(config.installDir, "config.json");
+  const scriptPath = path.join(config.installDir, "run-export.sh");
   const plistPath = path.join(os.homedir(), "Library", "LaunchAgents", `${LABEL}.plist`);
-  fs.writeFileSync(configPath, JSON.stringify(options, null, 2));
+  fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
   fs.writeFileSync(scriptPath, buildRunnerScript(configPath), { mode: 0o755 });
   fs.mkdirSync(path.dirname(plistPath), { recursive: true });
-  fs.writeFileSync(plistPath, buildPlist(scriptPath, options.scheduleHour, options.scheduleMinute));
+  fs.writeFileSync(plistPath, buildPlist(scriptPath, config.scheduleHour, config.scheduleMinute));
   return { configPath, scriptPath, plistPath };
 }
 
-function loadLaunchAgent(plistPath: string): void {
-  try {
-    execFileSync("launchctl", ["unload", plistPath], { stdio: "ignore" });
-  } catch {}
-  execFileSync("launchctl", ["load", plistPath], { stdio: "inherit" });
+function currentGuiDomain(): string {
+  const getuid = process.getuid;
+  if (!getuid) throw new Error("process.getuid() is not available on this platform.");
+  return `gui/${getuid.call(process)}`;
 }
 
-async function resolveOptions(): Promise<InstallOptions> {
+function loadLaunchAgent(plistPath: string): void {
+  const domain = currentGuiDomain();
+  try {
+    execFileSync("launchctl", ["bootout", domain, plistPath], { stdio: "ignore" });
+  } catch {}
+  execFileSync("launchctl", ["bootstrap", domain, plistPath], { stdio: "inherit" });
+}
+
+function unloadLaunchAgent(plistPath: string): void {
+  const domain = currentGuiDomain();
+  try {
+    execFileSync("launchctl", ["bootout", domain, plistPath], { stdio: "inherit" });
+  } catch {}
+}
+
+function buildConfig(input: {
+  outputDir: string;
+  schedule: string;
+  runQmdEmbed: boolean;
+  qmdCommand?: string;
+  acPowerOnly: boolean;
+  dbPath: string;
+  myName: string;
+  excludeChatRegex?: string;
+  includeSystem: boolean;
+  includeEmpty: boolean;
+  installDir: string;
+}): AppConfig {
+  const { hour, minute } = validateSchedule(input.schedule);
+  return {
+    version: CONFIG_VERSION,
+    outputDir: expandHome(input.outputDir),
+    scheduleHour: hour,
+    scheduleMinute: minute,
+    runQmdEmbed: input.runQmdEmbed,
+    qmdCommand: input.qmdCommand,
+    acPowerOnly: input.acPowerOnly,
+    dbPath: expandHome(input.dbPath),
+    myName: input.myName,
+    excludeChatRegex: input.excludeChatRegex || undefined,
+    includeSystem: input.includeSystem,
+    includeEmpty: input.includeEmpty,
+    installDir: expandHome(input.installDir),
+    repoDir: process.cwd(),
+  };
+}
+
+async function resolveConfig(): Promise<AppConfig> {
   const program = new Command();
   program
     .option("--output-dir <path>")
@@ -133,26 +161,40 @@ async function resolveOptions(): Promise<InstallOptions> {
     .option("--include-system")
     .option("--include-empty")
     .option("--install-dir <path>", DEFAULT_INSTALL_DIR)
-    .option("--yes", "Skip prompts");
+    .option("--yes", "Skip prompts")
+    .option("--doctor", "Run dependency/path checks before installing")
+    .option("--uninstall", "Remove installed launchd job and local install files");
   program.parse(process.argv);
   const cli = program.opts();
 
+  if (cli.uninstall) {
+    const plistPath = path.join(os.homedir(), "Library", "LaunchAgents", `${LABEL}.plist`);
+    unloadLaunchAgent(plistPath);
+    fs.rmSync(expandHome(String(cli.installDir || DEFAULT_INSTALL_DIR)), { recursive: true, force: true });
+    fs.rmSync(plistPath, { force: true });
+    console.log("Uninstalled imessage-to-markdown launchd job.");
+    process.exit(0);
+  }
+
+  if (cli.doctor) {
+    const doctor = runDoctor(expandHome(String(cli.dbPath || DEFAULT_DB)));
+    for (const warning of doctor.warnings) console.log(`- ${warning}`);
+  }
+
   if (cli.yes) {
-    const [hour, minute] = String(cli.schedule).split(":").map(Number);
-    return {
-      outputDir: expandHome(cli.outputDir || DEFAULT_OUTPUT_DIR),
-      scheduleHour: hour,
-      scheduleMinute: minute,
+    return buildConfig({
+      outputDir: cli.outputDir || DEFAULT_OUTPUT_DIR,
+      schedule: cli.schedule,
       runQmdEmbed: Boolean(cli.runQmdEmbed),
       qmdCommand: cli.qmdCommand,
       acPowerOnly: Boolean(cli.acPowerOnly),
-      dbPath: expandHome(cli.dbPath || DEFAULT_DB),
+      dbPath: String(cli.dbPath || DEFAULT_DB),
       myName: cli.myName,
       excludeChatRegex: cli.excludeChatRegex,
       includeSystem: Boolean(cli.includeSystem),
       includeEmpty: Boolean(cli.includeEmpty),
-      installDir: expandHome(cli.installDir || DEFAULT_INSTALL_DIR),
-    };
+      installDir: cli.installDir || DEFAULT_INSTALL_DIR,
+    });
   }
 
   const response = await prompts([
@@ -167,6 +209,14 @@ async function resolveOptions(): Promise<InstallOptions> {
       name: "schedule",
       message: "What time should it run each day? (HH:MM)",
       initial: cli.schedule || "05:30",
+      validate: (value: string) => {
+        try {
+          validateSchedule(value);
+          return true;
+        } catch (error) {
+          return error instanceof Error ? error.message : "Invalid schedule";
+        }
+      },
     },
     {
       type: "confirm",
@@ -200,32 +250,32 @@ async function resolveOptions(): Promise<InstallOptions> {
     },
   ]);
 
-  const [hour, minute] = String(response.schedule).split(":").map(Number);
-  return {
-    outputDir: expandHome(response.outputDir || cli.outputDir || DEFAULT_OUTPUT_DIR),
-    scheduleHour: hour,
-    scheduleMinute: minute,
+  return buildConfig({
+    outputDir: response.outputDir || cli.outputDir || DEFAULT_OUTPUT_DIR,
+    schedule: response.schedule || cli.schedule,
     runQmdEmbed: Boolean(response.runQmdEmbed),
     qmdCommand: response.qmdCommand || cli.qmdCommand,
     acPowerOnly: Boolean(response.acPowerOnly),
-    dbPath: expandHome(cli.dbPath || DEFAULT_DB),
+    dbPath: cli.dbPath || DEFAULT_DB,
     myName: response.myName || cli.myName || "Mike",
     excludeChatRegex: response.excludeChatRegex || cli.excludeChatRegex,
     includeSystem: Boolean(cli.includeSystem),
     includeEmpty: Boolean(cli.includeEmpty),
-    installDir: expandHome(cli.installDir || DEFAULT_INSTALL_DIR),
-  };
+    installDir: cli.installDir || DEFAULT_INSTALL_DIR,
+  });
 }
 
 export async function main(): Promise<void> {
-  ensureJq();
-  const options = await resolveOptions();
-  const { plistPath, configPath } = writeInstallFiles(options);
+  const config = await resolveConfig();
+  const doctor = runDoctor(config.dbPath);
+  for (const warning of doctor.warnings) console.log(`- ${warning}`);
+  const { plistPath, configPath } = writeInstallFiles(config);
   loadLaunchAgent(plistPath);
   console.log(`Installed launchd agent: ${LABEL}`);
   console.log(`Config: ${configPath}`);
-  console.log(`Output dir: ${options.outputDir}`);
-  console.log(`Schedule: ${String(options.scheduleHour).padStart(2, "0")}:${String(options.scheduleMinute).padStart(2, "0")}`);
+  console.log(`Output dir: ${config.outputDir}`);
+  console.log(`Repo dir: ${config.repoDir}`);
+  console.log(`Schedule: ${String(config.scheduleHour).padStart(2, "0")}:${String(config.scheduleMinute).padStart(2, "0")}`);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

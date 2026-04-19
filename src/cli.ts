@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { Command } from "commander";
 
-import { exportMarkdown } from "./exporter.js";
+import { exportFromSource } from "./exporter.js";
 import { expandHome } from "./utils.js";
 
 function parseDate(input: string | undefined, fallback: Date): Date {
@@ -11,54 +11,41 @@ function parseDate(input: string | undefined, fallback: Date): Date {
   return parsed;
 }
 
-export function main(argv = process.argv): void {
+export async function main(argv = process.argv): Promise<void> {
   const program = new Command();
   program
     .name("imessage-to-markdown")
-    .description("Export Apple Messages/iMessage to markdown")
-    .option("--db-path <path>", "Path to chat.db", "~/Library/Messages/chat.db")
+    .description("Export multiple messaging sources to markdown")
+    .requiredOption("--source <name>", "Source adapter: imessage | telegram | whatsapp | signal")
+    .option("--db-path <path>", "Path to iMessage chat.db", "~/Library/Messages/chat.db")
+    .option("--export-path <path>", "Path to Telegram/WhatsApp/Signal export")
     .option("--output-dir <path>", "Directory for markdown output", "./exports")
-    .option("--days <days>", "Export last N days", "1")
+    .option("--days <days>", "Export last N days for iMessage", "1")
     .option("--start <iso>", "Start datetime ISO8601")
     .option("--end <iso>", "End datetime ISO8601")
     .option("--my-name <name>", "Label for sent messages", "Mike")
-    .option("--exclude-chat-regex <regex>", "Regex to exclude chats by name")
-    .option("--include-system", "Include system-ish chats")
     .option("--include-empty", "Include empty messages with only metadata")
-    .option("--json", "Print JSON summary")
     .parse(argv);
 
   const options = program.opts();
   const end = parseDate(options.end, new Date());
   const start = parseDate(options.start, new Date(end.getTime() - Number(options.days) * 24 * 60 * 60 * 1000));
 
-  const result = exportMarkdown({
+  const result = await exportFromSource(String(options.source), {
     dbPath: expandHome(options.dbPath),
+    exportPath: options.exportPath ? expandHome(options.exportPath) : undefined,
     outputDir: expandHome(options.outputDir),
     start,
     end,
     myName: options.myName,
-    excludeChatRegex: options.excludeChatRegex,
-    skipSystem: !options.includeSystem,
     includeEmpty: Boolean(options.includeEmpty),
   });
 
-  const summary = {
-    filesWritten: result.filesWritten,
-    messagesExported: result.messagesExported,
-    outputPaths: result.outputPaths,
-    start: start.toISOString(),
-    end: end.toISOString(),
-  };
-
-  if (options.json) {
-    console.log(JSON.stringify(summary, null, 2));
-  } else {
-    console.log(`Wrote ${result.filesWritten} file(s), exported ${result.messagesExported} message(s).`);
-    for (const out of result.outputPaths) console.log(out);
-  }
+  console.log(`Wrote ${result.filesWritten} file(s).`);
+  for (const out of result.outputPaths.slice(0, 20)) console.log(out);
+  if (result.outputPaths.length > 20) console.log(`...and ${result.outputPaths.length - 20} more`);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  main();
+  void main();
 }

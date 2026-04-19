@@ -1,6 +1,13 @@
 import { ChatDayExport, ExportMessage } from "./types.js";
 import { slugForChat } from "./utils.js";
 
+function localDateKey(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 export function groupMessagesByChatDay(messages: ExportMessage[]): ChatDayExport[] {
   const grouped = new Map<string, ExportMessage[]>();
   const titles = new Map<string, string>();
@@ -8,7 +15,7 @@ export function groupMessagesByChatDay(messages: ExportMessage[]): ChatDayExport
   for (const message of [...messages].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())) {
     const chatTitle = message.chatDisplayName || message.participants.join(", ") || "Unknown Chat";
     const chatKey = slugForChat(message.chatDisplayName, message.participants, `chat-${message.messageId}`);
-    const dateKey = message.timestamp.toISOString().slice(0, 10);
+    const dateKey = localDateKey(message.timestamp);
     const key = `${chatKey}::${dateKey}`;
     const list = grouped.get(key) || [];
     list.push(message);

@@ -1,54 +1,23 @@
 # imessage-to-markdown
 
-Export Apple Messages from macOS `chat.db` into clean markdown files, one conversation per day, with an install flow that can set up daily automation for you.
+Export multiple messaging sources into a shared markdown format.
 
-This tool is built for local-first personal archiving, Brain-style ingestion, and simple daily syncs from Messages into markdown.
+## Supported sources
 
-## Why TypeScript
+- `imessage`
+  - reads macOS `chat.db`
+- `telegram`
+  - reads Telegram Desktop JSON exports
+- `whatsapp`
+  - reads exported WhatsApp chat `.txt` files
+- `signal`
+  - reads Signal markdown exports, designed to pair with tools like `signal-export`
 
-This project started in Python, then moved to TypeScript because the long-term goal is not just a script, it is an easy installable tool that more people will actually want to touch, tweak, and contribute to.
+## Core idea
 
-TypeScript is a better fit for that packaging and CLI ergonomics story.
+Each source has its own adapter, but all adapters normalize into one internal conversation/message model and one shared markdown renderer.
 
-## What it does
-
-- reads `~/Library/Messages/chat.db` by default
-- exports the last day by default, or any date range you specify
-- writes one markdown file per conversation per day
-- includes timestamps and sender attribution
-- skips media payloads, but notes when a message had attachments
-- supports excluding chats by regex
-- tries to skip obvious system-ish threads by default
-- includes an installer that can create and load a `launchd` agent
-- supports interactive install and fully non-interactive CLI install
-
-## What it does not do
-
-- it does not send messages
-- it does not upload anything anywhere
-- it does not export actual image, video, or audio payloads
-- it does not perfectly reconstruct every iMessage rich-text edge case
-
-## Requirements
-
-- macOS
-- Node.js 20+
-- `sqlite3` available on the system
-- `jq` available on the system for the generated runner script
-- Full Disk Access for the terminal app or app that will read `~/Library/Messages/chat.db`
-
-## macOS permission note
-
-Apple protects `~/Library/Messages/chat.db` behind Full Disk Access.
-
-You will likely need to give **Terminal**, **iTerm**, or whatever launches Node full disk access:
-
-- System Settings
-- Privacy & Security
-- Full Disk Access
-- enable your terminal app
-
-Without that, reads from `chat.db` will fail.
+That means the repo is now structured to support multi-platform export without each platform reinventing rendering.
 
 ## Install
 
@@ -59,139 +28,61 @@ npm install
 npm run build
 ```
 
-## Basic usage
+## Usage
 
-Export last 24 hours to `./exports`:
-
-```bash
-node dist/cli.js
-```
-
-Or with `tsx` during development:
-
-```bash
-npx tsx src/cli.ts --output-dir "$HOME/brain/inbox/messages"
-```
-
-### Examples
-
-Export last 3 days:
-
-```bash
-node dist/cli.js --days 3 --output-dir "$HOME/brain/inbox/messages"
-```
-
-Export an exact range:
+### iMessage
 
 ```bash
 node dist/cli.js \
-  --start 2026-04-19T00:00:00-04:00 \
-  --end 2026-04-20T00:00:00-04:00 \
-  --output-dir "$HOME/brain/inbox/messages"
+  --source imessage \
+  --db-path ~/Library/Messages/chat.db \
+  --output-dir ~/brain/iMessage
 ```
 
-Exclude chats matching a regex:
+### Telegram
 
 ```bash
-node dist/cli.js --exclude-chat-regex 'Amazon|CVS|verification|OTP'
+node dist/cli.js \
+  --source telegram \
+  --export-path ~/Downloads/telegram-export/result.json \
+  --output-dir ~/brain/messages
 ```
 
-Emit JSON summary:
+### WhatsApp
 
 ```bash
-node dist/cli.js --json
+node dist/cli.js \
+  --source whatsapp \
+  --export-path ~/Downloads/_chat.txt \
+  --output-dir ~/brain/messages
 ```
 
-## One-click style install
-
-There are two install modes.
-
-### 1. Interactive install
-
-This prompts for the output directory and automation settings:
+### Signal
 
 ```bash
-npm run install:local
+node dist/cli.js \
+  --source signal \
+  --export-path ~/signal-chats \
+  --output-dir ~/brain/messages
 ```
 
-You will be asked:
-- where markdown files should be written
-- what time the export should run daily
-- whether to run only on AC power
-- whether to run `qmd embed` afterward
-- what your sent-message name should be
-- which regex to use for ignored chats
+## Installer status
 
-### 2. Fully non-interactive install
+The included installer is still aimed at the iMessage scheduled-export flow on macOS. The repo now supports multiple adapters, but the installer is not yet a universal multi-source setup wizard.
 
-This is good for agents, scripts, and power users:
+## Source-specific notes
 
-```bash
-node dist/install.js \
-  --yes \
-  --output-dir "$HOME/brain/inbox/messages" \
-  --schedule 05:30 \
-  --ac-power-only \
-  --run-qmd-embed \
-  --qmd-command "qmd embed" \
-  --my-name "Mike" \
-  --exclude-chat-regex 'Amazon|CVS|verification|OTP'
-```
+### Telegram
+- best paired with Telegram Desktop export JSON
+- current adapter expects JSON exports
 
-That writes:
-- a config file in `~/.imessage-to-markdown/`
-- a runner shell script in `~/.imessage-to-markdown/`
-- a LaunchAgent plist in `~/Library/LaunchAgents/`
+### WhatsApp
+- current adapter expects exported text chat logs
+- deeper backup/database support is still future work
 
-Then it loads the LaunchAgent with `launchctl`.
-
-## How automation works
-
-The installer creates a daily `launchd` job.
-
-At runtime the job:
-- checks whether AC-only mode is enabled
-- if enabled, skips the run when the Mac is on battery
-- exports messages to markdown
-- optionally runs a follow-up command like `qmd embed`
-
-So the battery-aware logic is handled in the generated runner script, not by `launchd` itself.
-
-## Output format
-
-Example file:
-
-```md
-# Karissa
-Date: 2026-04-19
-Generated: 2026-04-19T13:42:13.000Z
-
-- 08:12 Mike: Heading out now
-- 08:13 Karissa: Can you grab coffee on the way back?
-- 08:14 Mike: Yep
-```
-
-Files are written like:
-
-```text
-exports/
-  2026-04-19/
-    Karissa.md
-    Family Chat.md
-```
-
-## Brain / qmd suggestion
-
-If your Brain system already ingests a folder tree, point `--output-dir` there directly.
-
-Example:
-
-```bash
-node dist/cli.js --output-dir "$HOME/brain/inbox/messages"
-qmd embed
-```
-
-Or let the installer wire that into the scheduled job.
+### Signal
+- current adapter is designed to ingest markdown-style exports
+- practical pairing: `carderne/signal-export`
 
 ## Development
 
@@ -202,14 +93,12 @@ npm test
 npm run lint
 ```
 
-## Limitations
+## Current limitations
 
-- Apple changes the Messages schema over time.
-- `attributedBody` extraction is best-effort.
-- group chat naming can be inconsistent if a chat has no display name.
-- reactions, edits, replies, and some system messages are not yet richly rendered.
-- media is intentionally omitted.
-- the installer currently expects `jq` to be available for config parsing in the generated runner script.
+- iMessage remains the deepest native integration
+- Telegram, WhatsApp, and Signal support are adapter-first, not yet exhaustive
+- message schema quirks vary by platform export format
+- attachments are intentionally simplified in the common markdown renderer
 
 ## License
 
