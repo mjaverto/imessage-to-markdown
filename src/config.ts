@@ -2,7 +2,9 @@ export const CONFIG_VERSION = 1;
 
 export interface AppConfig {
   version: number;
+  source: string;
   outputDir: string;
+  exportPath?: string;
   scheduleHour: number;
   scheduleMinute: number;
   runQmdEmbed: boolean;
@@ -10,8 +12,6 @@ export interface AppConfig {
   acPowerOnly: boolean;
   dbPath: string;
   myName: string;
-  excludeChatRegex?: string;
-  includeSystem: boolean;
   includeEmpty: boolean;
   installDir: string;
   repoDir: string;

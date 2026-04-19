@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { ExportAdapter, NormalizedConversation, NormalizedMessage } from "../core/model.js";
+import { ExportAdapter, NormalizedAttachment, NormalizedConversation, NormalizedMessage } from "../core/model.js";
 
 const APPLE_EPOCH_MS = Date.UTC(2001, 0, 1, 0, 0, 0);
 
@@ -13,18 +13,30 @@ function appleTimeToDate(raw: string): Date {
   return new Date(APPLE_EPOCH_MS + seconds * 1000);
 }
 
+function cleanDecodedText(input: string): string {
+  return input
+    .replace(/streamtyped/gi, "")
+    .replace(/NSMutableAttributedString|NSAttributedString|NSMutableString|NSString|NSDictionary|NSNumber|NSValue|NSData|NSObject|NSURL/gi, " ")
+    .replace(/__kIM[A-Za-z0-9_]+/g, " ")
+    .replace(/bplist00/g, " ")
+    .replace(/[\u0000-\u001f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function decodeAttributedBodyHex(hex: string): string {
   if (!hex) return "";
   const buffer = Buffer.from(hex, "hex");
   const utf8 = buffer.toString("utf8").replace(/\u0000/g, " ");
   const nsStrings = [...utf8.matchAll(/NSString\s+([^\u0086]+?)(?=\s{2,}|__kIM|NSDictionary|$)/g)]
-    .map((match) => match[1]?.trim())
-    .filter((value): value is string => Boolean(value && value.trim()));
+    .map((match) => cleanDecodedText(match[1] || ""))
+    .filter((value): value is string => Boolean(value && value.trim()))
+    .filter((value) => !/^at_0_[A-F0-9-]+$/i.test(value));
   if (nsStrings.length > 0) {
     const longest = nsStrings.sort((a, b) => b.length - a.length)[0];
     if (longest) return longest;
   }
-  return utf8.replace(/\s+/g, " ").trim();
+  return cleanDecodedText(utf8);
 }
 
 function withReadableCopy<T>(dbPath: string, fn: (safeDbPath: string) => T): T {
@@ -40,6 +52,15 @@ function withReadableCopy<T>(dbPath: string, fn: (safeDbPath: string) => T): T {
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
+}
+
+function inferAttachmentKind(mimeType: string | null): NormalizedAttachment["kind"] {
+  if (!mimeType) return "other";
+  if (mimeType.startsWith("image/")) return "image";
+  if (mimeType.startsWith("video/")) return "video";
+  if (mimeType.startsWith("audio/")) return "audio";
+  if (mimeType.includes("pdf") || mimeType.includes("text") || mimeType.includes("application")) return "document";
+  return "other";
 }
 
 export const iMessageAdapter: ExportAdapter = {
@@ -61,22 +82,21 @@ SELECT
   m.is_from_me,
   COALESCE(m.text, '') AS text,
   COALESCE(hex(m.attributedBody), '') AS attributed_body_hex,
-  COALESCE(a.attachment_count, 0) AS attachment_count,
   COALESCE(h.id, '') AS sender_handle,
   COALESCE(c.guid, '') AS chat_guid,
   COALESCE(c.display_name, '') AS chat_display_name,
-  COALESCE(GROUP_CONCAT(DISTINCT h2.id), '') AS participant_handles
+  COALESCE(GROUP_CONCAT(DISTINCT h2.id), '') AS participant_handles,
+  COALESCE(GROUP_CONCAT(DISTINCT a.filename), '') AS attachment_files,
+  COALESCE(GROUP_CONCAT(DISTINCT a.mime_type), '') AS attachment_mime_types,
+  COALESCE(COUNT(DISTINCT a.ROWID), 0) AS attachment_count
 FROM message m
 LEFT JOIN handle h ON h.ROWID = m.handle_id
 LEFT JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
 LEFT JOIN chat c ON c.ROWID = cmj.chat_id
 LEFT JOIN chat_handle_join chj ON chj.chat_id = c.ROWID
 LEFT JOIN handle h2 ON h2.ROWID = chj.handle_id
-LEFT JOIN (
-  SELECT message_id, COUNT(*) AS attachment_count
-  FROM message_attachment_join
-  GROUP BY message_id
-) a ON a.message_id = m.ROWID
+LEFT JOIN message_attachment_join maj ON maj.message_id = m.ROWID
+LEFT JOIN attachment a ON a.ROWID = maj.attachment_id
 WHERE m.date >= ${startApple} AND m.date < ${endApple}
 GROUP BY m.ROWID
 ORDER BY m.date ASC;
@@ -88,8 +108,8 @@ ORDER BY m.date ASC;
       const conversations = new Map<string, NormalizedConversation>();
       for (const row of rows) {
         const text = String(row.text || "").trim() || decodeAttributedBodyHex(String(row.attributed_body_hex || ""));
-        const hadAttachments = Number(row.attachment_count || 0) > 0;
-        if (!includeEmpty && !text && !hadAttachments) continue;
+        const attachmentCount = Number(row.attachment_count || 0);
+        if (!includeEmpty && !text && attachmentCount === 0) continue;
         const participants = String(row.participant_handles || "")
           .split(",")
           .map((value) => value.trim())
@@ -105,13 +125,22 @@ ORDER BY m.date ASC;
           messages: [],
         };
         const isFromMe = Number(row.is_from_me || 0) === 1;
+        const files = String(row.attachment_files || "").split(",").map((value) => value.trim()).filter(Boolean);
+        const mimeTypes = String(row.attachment_mime_types || "").split(",").map((value) => value.trim()).filter(Boolean);
+        const attachments: NormalizedAttachment[] = files.map((file, index) => ({
+          path: file,
+          name: path.basename(file),
+          mimeType: mimeTypes[index] || undefined,
+          kind: inferAttachmentKind(mimeTypes[index] || null),
+        }));
         const message: NormalizedMessage = {
           id: String(row.message_id),
           timestamp: appleTimeToDate(String(row.message_date || "0")),
           sender: isFromMe ? myName : String(row.sender_handle || "Unknown"),
           text,
           isFromMe,
-          hadAttachments,
+          hadAttachments: attachmentCount > 0,
+          attachments,
         };
         convo.messages.push(message);
         conversations.set(conversationId, convo);

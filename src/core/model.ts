@@ -13,6 +13,7 @@ export interface NormalizedAttachment {
   name?: string;
   path?: string;
   mimeType?: string;
+  kind?: "image" | "video" | "audio" | "document" | "other";
 }
 
 export interface NormalizedConversation {

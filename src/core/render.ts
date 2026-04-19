@@ -17,8 +17,10 @@ function renderLine(message: NormalizedMessage): string {
   const hh = String(message.timestamp.getHours()).padStart(2, "0");
   const mm = String(message.timestamp.getMinutes()).padStart(2, "0");
   const text = message.text.trim() || "[no text]";
-  const attachmentNote = message.hadAttachments ? " [attachments omitted]" : "";
-  return `- ${hh}:${mm} ${message.sender}: ${text}${attachmentNote}`;
+  const attachmentSummary = message.attachments?.length
+    ? ` [${message.attachments.length} attachment${message.attachments.length === 1 ? "" : "s"} omitted]`
+    : message.hadAttachments ? " [attachments omitted]" : "";
+  return `- ${hh}:${mm} ${message.sender}: ${text}${attachmentSummary}`;
 }
 
 export function renderConversationDays(conversation: NormalizedConversation): RenderedFile[] {
@@ -36,10 +38,11 @@ export function renderConversationDays(conversation: NormalizedConversation): Re
       `# ${conversation.title}`,
       `Source: ${conversation.source}`,
       `Date: ${key}`,
+      conversation.participants.length ? `Participants: ${conversation.participants.join(", ")}` : undefined,
       "",
       ...messages.map(renderLine),
       "",
-    ];
+    ].filter((line): line is string => typeof line === "string");
     return {
       relativePath: `${conversation.source}/${key}/${safeTitle}.md`,
       content: lines.join("\n"),

@@ -36,10 +36,13 @@ if (config.acPowerOnly) {
   }
 }
 process.chdir(config.repoDir);
-const args = ["dist/cli.js", "--output-dir", config.outputDir, "--db-path", config.dbPath, "--my-name", config.myName];
-if (config.excludeChatRegex) args.push("--exclude-chat-regex", config.excludeChatRegex);
-if (config.includeSystem) args.push("--include-system");
-if (config.includeEmpty) args.push("--include-empty");
+const args = ["dist/cli.js", "--source", config.source, "--output-dir", config.outputDir];
+if (config.source === "imessage") {
+  args.push("--db-path", config.dbPath, "--my-name", config.myName);
+  if (config.includeEmpty) args.push("--include-empty");
+} else if (config.exportPath) {
+  args.push("--export-path", config.exportPath);
+}
 execFileSync("node", args, { stdio: "inherit" });
 if (config.runQmdEmbed && config.qmdCommand) {
   execFileSync("bash", ["-lc", config.qmdCommand], { stdio: "inherit" });
@@ -48,7 +51,7 @@ EOF
 `;
 }
 
-function buildPlist(scriptPath: string, hour: number, minute: number): string {
+function buildPlist(scriptPath: string, configPath: string, hour: number, minute: number): string {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -62,7 +65,7 @@ function buildPlist(scriptPath: string, hour: number, minute: number): string {
     <key>EnvironmentVariables</key>
     <dict>
       <key>CONFIG_PATH</key>
-      <string>${path.join(DEFAULT_INSTALL_DIR, "config.json")}</string>
+      <string>${configPath}</string>
     </dict>
     <key>StartCalendarInterval</key>
     <dict>
@@ -90,7 +93,7 @@ function writeInstallFiles(config: AppConfig): { configPath: string; scriptPath:
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
   fs.writeFileSync(scriptPath, buildRunnerScript(configPath), { mode: 0o755 });
   fs.mkdirSync(path.dirname(plistPath), { recursive: true });
-  fs.writeFileSync(plistPath, buildPlist(scriptPath, config.scheduleHour, config.scheduleMinute));
+  fs.writeFileSync(plistPath, buildPlist(scriptPath, configPath, config.scheduleHour, config.scheduleMinute));
   return { configPath, scriptPath, plistPath };
 }
 
@@ -116,22 +119,24 @@ function unloadLaunchAgent(plistPath: string): void {
 }
 
 function buildConfig(input: {
+  source: string;
   outputDir: string;
+  exportPath?: string;
   schedule: string;
   runQmdEmbed: boolean;
   qmdCommand?: string;
   acPowerOnly: boolean;
   dbPath: string;
   myName: string;
-  excludeChatRegex?: string;
-  includeSystem: boolean;
   includeEmpty: boolean;
   installDir: string;
 }): AppConfig {
   const { hour, minute } = validateSchedule(input.schedule);
   return {
     version: CONFIG_VERSION,
+    source: input.source,
     outputDir: expandHome(input.outputDir),
+    exportPath: input.exportPath ? expandHome(input.exportPath) : undefined,
     scheduleHour: hour,
     scheduleMinute: minute,
     runQmdEmbed: input.runQmdEmbed,
@@ -139,8 +144,6 @@ function buildConfig(input: {
     acPowerOnly: input.acPowerOnly,
     dbPath: expandHome(input.dbPath),
     myName: input.myName,
-    excludeChatRegex: input.excludeChatRegex || undefined,
-    includeSystem: input.includeSystem,
     includeEmpty: input.includeEmpty,
     installDir: expandHome(input.installDir),
     repoDir: process.cwd(),
@@ -150,15 +153,15 @@ function buildConfig(input: {
 async function resolveConfig(): Promise<AppConfig> {
   const program = new Command();
   program
+    .option("--source <name>", "Source adapter to schedule", "imessage")
     .option("--output-dir <path>")
+    .option("--export-path <path>")
     .option("--schedule <hh:mm>", "Daily schedule time", "05:30")
     .option("--run-qmd-embed")
     .option("--qmd-command <command>")
     .option("--ac-power-only")
     .option("--db-path <path>", undefined, DEFAULT_DB)
     .option("--my-name <name>", "Mike")
-    .option("--exclude-chat-regex <regex>")
-    .option("--include-system")
     .option("--include-empty")
     .option("--install-dir <path>", DEFAULT_INSTALL_DIR)
     .option("--yes", "Skip prompts")
@@ -177,21 +180,21 @@ async function resolveConfig(): Promise<AppConfig> {
   }
 
   if (cli.doctor) {
-    const doctor = runDoctor(expandHome(String(cli.dbPath || DEFAULT_DB)));
+    const doctor = runDoctor(String(cli.source || "imessage"), expandHome(String(cli.dbPath || DEFAULT_DB)), cli.exportPath ? expandHome(String(cli.exportPath)) : undefined);
     for (const warning of doctor.warnings) console.log(`- ${warning}`);
   }
 
   if (cli.yes) {
     return buildConfig({
+      source: String(cli.source || "imessage"),
       outputDir: cli.outputDir || DEFAULT_OUTPUT_DIR,
+      exportPath: cli.exportPath,
       schedule: cli.schedule,
       runQmdEmbed: Boolean(cli.runQmdEmbed),
       qmdCommand: cli.qmdCommand,
       acPowerOnly: Boolean(cli.acPowerOnly),
       dbPath: String(cli.dbPath || DEFAULT_DB),
       myName: cli.myName,
-      excludeChatRegex: cli.excludeChatRegex,
-      includeSystem: Boolean(cli.includeSystem),
       includeEmpty: Boolean(cli.includeEmpty),
       installDir: cli.installDir || DEFAULT_INSTALL_DIR,
     });
@@ -199,10 +202,28 @@ async function resolveConfig(): Promise<AppConfig> {
 
   const response = await prompts([
     {
+      type: "select",
+      name: "source",
+      message: "Which source should this scheduled job export?",
+      choices: [
+        { title: "iMessage", value: "imessage" },
+        { title: "Telegram", value: "telegram" },
+        { title: "WhatsApp", value: "whatsapp" },
+        { title: "Signal", value: "signal" },
+      ],
+      initial: 0,
+    },
+    {
       type: "text",
       name: "outputDir",
       message: "Where should exported markdown messages go?",
       initial: cli.outputDir || DEFAULT_OUTPUT_DIR,
+    },
+    {
+      type: (prev, values) => (values.source === "imessage" ? null : "text"),
+      name: "exportPath",
+      message: "Where is the export file or directory for this source?",
+      initial: cli.exportPath || "~/Downloads/export",
     },
     {
       type: "text",
@@ -237,29 +258,23 @@ async function resolveConfig(): Promise<AppConfig> {
       initial: cli.qmdCommand || "qmd embed",
     },
     {
-      type: "text",
+      type: (prev, values) => (values.source === "imessage" ? "text" : null),
       name: "myName",
-      message: "What should sent messages be labeled as?",
+      message: "What should sent iMessages be labeled as?",
       initial: cli.myName || "Mike",
-    },
-    {
-      type: "text",
-      name: "excludeChatRegex",
-      message: "Regex for chats to skip, leave blank for none",
-      initial: cli.excludeChatRegex || "Amazon|CVS|verification|OTP",
     },
   ]);
 
   return buildConfig({
+    source: response.source || cli.source || "imessage",
     outputDir: response.outputDir || cli.outputDir || DEFAULT_OUTPUT_DIR,
+    exportPath: response.exportPath || cli.exportPath,
     schedule: response.schedule || cli.schedule,
     runQmdEmbed: Boolean(response.runQmdEmbed),
     qmdCommand: response.qmdCommand || cli.qmdCommand,
     acPowerOnly: Boolean(response.acPowerOnly),
-    dbPath: cli.dbPath || DEFAULT_DB,
+    dbPath: String(cli.dbPath || DEFAULT_DB),
     myName: response.myName || cli.myName || "Mike",
-    excludeChatRegex: response.excludeChatRegex || cli.excludeChatRegex,
-    includeSystem: Boolean(cli.includeSystem),
     includeEmpty: Boolean(cli.includeEmpty),
     installDir: cli.installDir || DEFAULT_INSTALL_DIR,
   });
@@ -267,13 +282,15 @@ async function resolveConfig(): Promise<AppConfig> {
 
 export async function main(): Promise<void> {
   const config = await resolveConfig();
-  const doctor = runDoctor(config.dbPath);
+  const doctor = runDoctor(config.source, config.dbPath, config.exportPath);
   for (const warning of doctor.warnings) console.log(`- ${warning}`);
   const { plistPath, configPath } = writeInstallFiles(config);
   loadLaunchAgent(plistPath);
   console.log(`Installed launchd agent: ${LABEL}`);
   console.log(`Config: ${configPath}`);
+  console.log(`Source: ${config.source}`);
   console.log(`Output dir: ${config.outputDir}`);
+  if (config.exportPath) console.log(`Export path: ${config.exportPath}`);
   console.log(`Repo dir: ${config.repoDir}`);
   console.log(`Schedule: ${String(config.scheduleHour).padStart(2, "0")}:${String(config.scheduleMinute).padStart(2, "0")}`);
 }
