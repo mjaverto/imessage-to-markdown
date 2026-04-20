@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 
@@ -34,7 +35,6 @@ interface MessageRow {
   body: string | null;
   type: string | null;
   hasAttachments: number | null;
-  isFromMe: number | null;
 }
 
 function conversationTitle(row: ConversationRow): string {
@@ -63,28 +63,34 @@ function withReadableDbCopy<T>(dbPath: string, fn: (safeDbPath: string) => T): T
   }
 }
 
+// Native module loaded via createRequire so tsup leaves it as a runtime
+// require in the ESM bundle instead of trying to inline it (which fails
+// with "Dynamic require of ... is not supported" for CJS native modules).
+const nativeRequire = createRequire(import.meta.url);
+type SignalDatabaseCtor = new (
+  filename: string,
+  options?: { readonly?: boolean; fileMustExist?: boolean },
+) => {
+  pragma: (source: string, options?: { simple?: boolean }) => unknown;
+  prepare: (sql: string) => { all: (...params: unknown[]) => unknown[] };
+  close: () => void;
+};
+
 function openSignalDatabase(dbPath: string, configPath: string): {
   all: <T>(sql: string, params?: unknown[]) => T[];
   close: () => void;
 } {
-  // Deferred import: better-sqlite3-multiple-ciphers is a native module. Keeping
-  // it lazy avoids loading it (and failing on platforms that can't build it)
-  // unless the user actually runs the Signal adapter.
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const Database = require("better-sqlite3-multiple-ciphers") as new (
-    filename: string,
-    options?: { readonly?: boolean; fileMustExist?: boolean },
-  ) => {
-    pragma: (source: string, options?: { simple?: boolean }) => unknown;
-    prepare: (sql: string) => { all: (...params: unknown[]) => unknown[] };
-    close: () => void;
-  };
+  const Database = nativeRequire("better-sqlite3-multiple-ciphers") as SignalDatabaseCtor;
 
   const { hexKey } = resolveSignalKey(configPath);
   const db = new Database(dbPath, { readonly: true, fileMustExist: true });
-  // Signal Desktop uses SQLCipher 4 defaults.
+  // better-sqlite3-multiple-ciphers defaults to "sqleet" — we MUST select
+  // sqlcipher and its v4 defaults BEFORE issuing PRAGMA key, otherwise the
+  // key is interpreted under the wrong cipher and SQLCipher reports
+  // "file is not a database".
+  db.pragma("cipher='sqlcipher'");
+  db.pragma("legacy=4");
   db.pragma(`key = "x'${hexKey}'"`);
-  db.pragma("cipher_compatibility = 4");
   // Sanity check: reading schema requires the key to have taken effect.
   try {
     db.pragma("schema_version", { simple: true });
@@ -171,9 +177,10 @@ function readAll(
       }
 
       const messageRows = db.all<MessageRow>(
-        `SELECT id, conversationId, source, sent_at, received_at, body, type, hasAttachments, isFromMe
+        `SELECT id, conversationId, source, sent_at, received_at, body, type, hasAttachments
          FROM messages
-         WHERE (sent_at IS NULL OR (sent_at >= ? AND sent_at < ?))
+         WHERE type IN ('outgoing', 'incoming')
+           AND (sent_at IS NULL OR (sent_at >= ? AND sent_at < ?))
          ORDER BY COALESCE(sent_at, received_at) ASC;`,
         [start.getTime(), end.getTime()],
       );
@@ -184,7 +191,9 @@ function readAll(
         const text = (row.body ?? "").trim();
         const hadAttachments = Number(row.hasAttachments ?? 0) === 1;
         if (!includeEmpty && !text && !hadAttachments) continue;
-        const isFromMe = Number(row.isFromMe ?? 0) === 1;
+        // Signal denormalizes direction into the `type` column rather than a
+        // dedicated flag; `outgoing` = sent by this user, `incoming` = received.
+        const isFromMe = row.type === "outgoing";
         const ts = Number(row.sent_at ?? row.received_at ?? 0);
         const message: NormalizedMessage = {
           id: String(row.id),

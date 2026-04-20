@@ -84,23 +84,34 @@ export function decryptEncryptedKey(encryptedKeyHex: string, keychainPassword: s
  * Run `security find-generic-password` to fetch the Electron safeStorage
  * password Signal stashed in the macOS Keychain. Returns the raw password
  * string (Electron stores base64-encoded random bytes).
+ *
+ * Signal's keychain account name has varied across versions — current
+ * builds use "Signal Key", older builds used "Signal". Try both before
+ * giving up so users on either era work without manual config.
  */
 export function readKeychainPassword(
   service = "Signal Safe Storage",
-  account = "Signal",
+  accounts: readonly string[] = ["Signal Key", "Signal"],
 ): string {
-  try {
-    const out = execFileSync("security", ["find-generic-password", "-w", "-s", service, "-a", account], {
-      encoding: "utf8",
-    });
-    return out.replace(/\r?\n$/, "");
-  } catch (error) {
-    throw new SignalKeyError(
-      `Could not read Signal safeStorage password from macOS Keychain (service="${service}", account="${account}"). ` +
-        `Original error: ${(error as Error).message}`,
-      "keychain-missing",
-    );
+  const errors: string[] = [];
+  for (const account of accounts) {
+    try {
+      const out = execFileSync(
+        "security",
+        ["find-generic-password", "-w", "-s", service, "-a", account],
+        { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+      );
+      return out.replace(/\r?\n$/, "");
+    } catch (error) {
+      errors.push(`account="${account}": ${(error as Error).message}`);
+    }
   }
+  throw new SignalKeyError(
+    `Could not read Signal safeStorage password from macOS Keychain (service="${service}"). ` +
+      `Tried accounts: ${accounts.map((a) => `"${a}"`).join(", ")}. ` +
+      `Errors: ${errors.join(" | ")}`,
+    "keychain-missing",
+  );
 }
 
 function readSignalConfig(configPath: string): SignalConfigJson {
