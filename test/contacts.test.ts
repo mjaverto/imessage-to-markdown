@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import {
   _resetContactsCacheForTests,
@@ -176,5 +176,88 @@ describe("loadFromAddressBookSQLite", () => {
     fs.mkdirSync(path.join(tmpRoot, "empty-source"), { recursive: true });
     const result = await loadFromAddressBookSQLite({ sourcesDir: tmpRoot });
     expect(result).toBeNull();
+  });
+
+  describe("partial-failure aggregate log + skippedCount", () => {
+    function makeCorruptSource(sourceName: string): void {
+      const dir = path.join(tmpRoot, sourceName);
+      fs.mkdirSync(dir, { recursive: true });
+      // Anything that is not a valid SQLite file -- opening it as DB will throw.
+      fs.writeFileSync(path.join(dir, "AddressBook-v22.abcddb"), "this is not a sqlite database");
+    }
+
+    test("all sources succeed: skippedCount=0, no aggregate log", async () => {
+      makeSource("A-good", [
+        { firstName: "Tim", phones: ["+15705551111"] },
+      ]);
+      const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        const result = await loadFromAddressBookSQLite({ sourcesDir: tmpRoot });
+        expect(result).not.toBeNull();
+        expect(result!.sourceCount).toBe(1);
+        expect(result!.skippedCount).toBe(0);
+        expect(result!.failedSources).toEqual([]);
+        const aggregateCalls = warnSpy.mock.calls.filter((args) =>
+          String(args[0] ?? "").includes("AddressBook:"),
+        );
+        expect(aggregateCalls).toHaveLength(0);
+        expect(errSpy).not.toHaveBeenCalled();
+      } finally {
+        errSpy.mockRestore();
+        warnSpy.mockRestore();
+      }
+    });
+
+    test("some sources fail: warn-level aggregate, correct skippedCount and failedSources", async () => {
+      makeSource("A-good", [{ firstName: "Tim", phones: ["+15705551111"] }]);
+      makeCorruptSource("B-corrupt");
+      makeSource("C-good", [{ firstName: "Sam", phones: ["+15705552222"] }]);
+
+      const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        const result = await loadFromAddressBookSQLite({ sourcesDir: tmpRoot });
+        expect(result).not.toBeNull();
+        expect(result!.sourceCount).toBe(2);
+        expect(result!.skippedCount).toBe(1);
+        expect(result!.failedSources).toEqual(["B-corrupt"]);
+        expect(errSpy).not.toHaveBeenCalled();
+        const aggregate = warnSpy.mock.calls
+          .map((args) => String(args[0] ?? ""))
+          .find((msg) => msg.includes("AddressBook:"));
+        expect(aggregate).toBeDefined();
+        expect(aggregate).toContain("2/3 sources loaded");
+        expect(aggregate).toContain("1 failed");
+        expect(aggregate).toContain("B-corrupt");
+      } finally {
+        errSpy.mockRestore();
+        warnSpy.mockRestore();
+      }
+    });
+
+    test("all sources fail: error-level aggregate, sourceCount=0, falls through with map", async () => {
+      makeCorruptSource("A-corrupt");
+      makeCorruptSource("B-corrupt");
+
+      const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        const result = await loadFromAddressBookSQLite({ sourcesDir: tmpRoot });
+        expect(result).not.toBeNull();
+        expect(result!.sourceCount).toBe(0);
+        expect(result!.skippedCount).toBe(2);
+        expect(result!.failedSources).toEqual(["A-corrupt", "B-corrupt"]);
+        expect(result!.map.size).toBe(0);
+        expect(errSpy).toHaveBeenCalledTimes(1);
+        const errMsg = String(errSpy.mock.calls[0]?.[0] ?? "");
+        expect(errMsg).toContain("AddressBook:");
+        expect(errMsg).toContain("0/2 sources loaded");
+        expect(errMsg).toContain("2 failed");
+      } finally {
+        errSpy.mockRestore();
+        warnSpy.mockRestore();
+      }
+    });
   });
 });

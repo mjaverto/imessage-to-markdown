@@ -263,7 +263,7 @@ function mergeContactsMap(target: ContactsMap, source: ContactsMap): void {
  */
 export async function loadFromAddressBookSQLite(
   options: { sourcesDir?: string } = {},
-): Promise<{ map: ContactsMap; sourceCount: number } | null> {
+): Promise<{ map: ContactsMap; sourceCount: number; skippedCount: number; failedSources: string[] } | null> {
   const sourcesDir = options.sourcesDir || defaultAddressBookSourcesDir();
   if (!fs.existsSync(sourcesDir)) return null;
 
@@ -283,7 +283,9 @@ export async function loadFromAddressBookSQLite(
 
   const merged: ContactsMap = new Map();
   let usedSources = 0;
+  const failedSources: string[] = [];
   for (const dbPath of dbPaths) {
+    const sourceName = path.basename(path.dirname(dbPath));
     try {
       const perSource = await loadFromAbcddb(dbPath);
       if (perSource.size > 0) {
@@ -292,11 +294,31 @@ export async function loadFromAddressBookSQLite(
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.warn(`[contacts] Skipped AddressBook source ${path.basename(path.dirname(dbPath))}: ${message}`);
+      console.warn(`[contacts] Skipped AddressBook source ${sourceName}: ${message}`);
+      failedSources.push(sourceName);
     }
   }
 
-  return { map: merged, sourceCount: usedSources };
+  // Aggregate visibility: a single summary line so a partially-broken
+  // contacts setup (e.g. 5 of 6 sources corrupt) does not masquerade as
+  // success when only the per-source warns scroll past in noisy output.
+  // ERROR level when nothing loaded -- the downstream JXA fallback may
+  // still rescue the export, but the SQLite path itself was a total loss.
+  if (failedSources.length > 0) {
+    const summary = `${usedSources}/${dbPaths.length} sources loaded, ${failedSources.length} failed: ${failedSources.join(", ")}`;
+    if (usedSources === 0) {
+      console.error(`[contacts] AddressBook: ${summary}`);
+    } else {
+      console.warn(`[contacts] AddressBook: ${summary}`);
+    }
+  }
+
+  return {
+    map: merged,
+    sourceCount: usedSources,
+    skippedCount: failedSources.length,
+    failedSources,
+  };
 }
 
 /**
@@ -361,7 +383,9 @@ export async function loadContactsMap(options: { timeoutMs?: number } = {}): Pro
   try {
     const result = await loadFromAddressBookSQLite();
     if (result && result.map.size > 0) {
-      console.log(`[contacts] Loaded ${result.map.size} contacts from AddressBook SQLite (${result.sourceCount} sources).`);
+      console.log(
+        `[contacts] Loaded ${result.map.size} contacts from AddressBook SQLite (${result.sourceCount} sources, ${result.skippedCount} skipped).`,
+      );
       cached = result.map;
       cacheKey = key;
       return result.map;
