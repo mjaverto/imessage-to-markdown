@@ -4,12 +4,12 @@ Export conversations from multiple messaging apps into a shared markdown format.
 
 ## Supported sources
 
-| Source | Input | Support level |
-|---|---|---|
-| `imessage` | macOS `chat.db` | deepest native support |
-| `telegram` | Telegram Desktop JSON export | good first-pass adapter |
-| `whatsapp` | exported WhatsApp `.txt` chat logs | good first-pass adapter |
-| `signal` | Signal markdown exports from tools like `signal-export` | import adapter |
+| Source | Input |
+|---|---|
+| `imessage` | macOS `chat.db` |
+| `telegram` | Telegram Desktop JSON export |
+| `whatsapp` | exported WhatsApp `.txt` chat logs |
+| `signal` | Signal markdown exports from tools like `signal-export` |
 
 ## Architecture
 
