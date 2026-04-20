@@ -160,11 +160,21 @@ message_count: 12
 first_message: 2026-04-19T12:30:00.000Z
 last_message: 2026-04-19T18:45:00.000Z
 exported_at: 2026-04-19T19:30:00.000Z
+contacts_resolved: false          # only when contacts lookup was attempted and empty
 ---
 ```
 
 Downstream tooling (Obsidian, Dataview, custom indexers) can rely on the
 shape above being stable across sources.
+
+`contacts_resolved: false` is emitted **only** when contacts resolution
+was requested for the source (i.e. `--no-contacts` was not passed and
+the source is one that uses Contacts.app, currently `imessage` and
+`whatsapp`) **and** the resolved map came back empty (both AddressBook
+SQLite and JXA fallback failed). Use it to flag exports where raw phone
+numbers / emails appear in place of names so downstream indexers do not
+treat handles as canonical contact identities. The field is omitted on
+successful resolution and on `--no-contacts` runs.
 
 ## Installer
 
