@@ -11,6 +11,11 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Default to read-only. PR runs from forks must never get a token
+# with write scope.
+permissions:
+  contents: read
+
 jobs:
   lint-build-test:
     name: Lint, Build, Test
