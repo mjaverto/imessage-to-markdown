@@ -28,7 +28,7 @@ export async function exportFromSource(source: string, options: Record<string, u
   // loadContactsMap logs a warning and returns an empty map -- the export
   // falls back to raw handles in that case.
   const useContacts = options.useContacts !== false;
-  const contacts: ContactsMap | undefined = useContacts && source === "imessage"
+  const contacts: ContactsMap | undefined = useContacts && (source === "imessage" || source === "whatsapp")
     ? await loadContactsMap()
     : undefined;
   const useContactNames = Boolean(options.useContactNames);

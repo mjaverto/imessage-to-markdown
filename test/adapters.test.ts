@@ -146,12 +146,30 @@ describe("telegram adapter", () => {
 });
 
 describe("whatsapp adapter", () => {
-  test("parses txt export and attachment marker", async () => {
-    const file = path.join(fixtures, "whatsapp", "chat.txt");
-    const conversations = await whatsappAdapter.loadConversations({ exportPath: file });
-    expect(conversations[0]?.messages).toHaveLength(3);
-    expect(conversations[0]?.messages[1]?.sender).toBe("Karissa");
-    expect(conversations[0]?.messages[2]?.hadAttachments).toBe(true);
+  test("reads native ChatStorage.sqlite fixture", async () => {
+    const dbPath = path.join(fixtures, "whatsapp", "ChatStorage.sqlite");
+    const conversations = await whatsappAdapter.loadConversations({
+      whatsappDbPath: dbPath,
+      myName: "Me",
+      useContacts: false,
+      start: new Date("2024-01-01T00:00:00Z"),
+      end: new Date("2025-01-01T00:00:00Z"),
+    });
+
+    expect(conversations).toHaveLength(2);
+    const oneToOne = conversations.find((c) => c.title === "Karissa");
+    expect(oneToOne).toBeTruthy();
+    expect(oneToOne?.service).toBe("WhatsApp");
+    expect(oneToOne?.messages).toHaveLength(3);
+    expect(oneToOne?.messages[0]?.sender).toBe("Karissa M");
+    expect(oneToOne?.messages[0]?.text).toBe("hey there");
+    expect(oneToOne?.messages[1]?.isFromMe).toBe(true);
+    expect(oneToOne?.messages[1]?.sender).toBe("Me");
+    expect(oneToOne?.messages[2]?.hadAttachments).toBe(true);
+    expect(oneToOne?.messages[2]?.attachments?.[0]?.kind).toBe("image");
+
+    const group = conversations.find((c) => c.title === "Family");
+    expect(group?.messages[0]?.sender).toBe("Aunt Jane");
   });
 });
 

@@ -26,9 +26,14 @@ export async function main(argv = process.argv): Promise<void> {
     .description("Export messages from a source to markdown")
     .requiredOption("--source <name>", "Source adapter: imessage | telegram | whatsapp | signal")
     .option("--db-path <path>", "Path to iMessage chat.db", "~/Library/Messages/chat.db")
-    .option("--export-path <path>", "Path to Telegram/WhatsApp export")
+    .option("--export-path <path>", "Path to Telegram export")
     .option("--signal-db-path <path>", "Path to Signal Desktop db.sqlite", "~/Library/Application Support/Signal/sql/db.sqlite")
     .option("--signal-config-path <path>", "Path to Signal Desktop config.json", "~/Library/Application Support/Signal/config.json")
+    .option(
+      "--whatsapp-db-path <path>",
+      "Path to WhatsApp ChatStorage.sqlite",
+      "~/Library/Group Containers/group.net.whatsapp.WhatsApp.shared/ChatStorage.sqlite",
+    )
     .option("--output-dir <path>", "Directory for markdown output", "./exports")
     .option("--days <days>", "Export last N days for iMessage", "1")
     .option("--start <iso>", "Start datetime ISO8601")
@@ -51,6 +56,7 @@ export async function main(argv = process.argv): Promise<void> {
         exportPath: options.exportPath ? expandHome(String(options.exportPath)) : undefined,
         signalDbPath: expandHome(String(options.signalDbPath)),
         signalConfigPath: expandHome(String(options.signalConfigPath)),
+        whatsappDbPath: expandHome(String(options.whatsappDbPath)),
         outputDir: expandHome(String(options.outputDir)),
         start,
         end,
