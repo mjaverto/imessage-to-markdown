@@ -8,15 +8,16 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
-permissions:
-  contents: write
-  id-token: write
-
 jobs:
   release:
     name: Bump version and publish
     runs-on: macos-latest
     timeout-minutes: 25
+    # Least-privilege: scope write permissions to this job only so
+    # other jobs added to this workflow inherit the default read-only.
+    permissions:
+      contents: write
+      id-token: write
     steps:
       - name: Skip if release commit
         id: skip_check
@@ -82,16 +83,30 @@ jobs:
           echo "version=${new_version}" >> "$GITHUB_OUTPUT"
           echo "Bumped to ${new_version}"
 
-      - name: Commit, tag, and push
+      - name: Commit bump
         if: steps.skip_check.outputs.skip != 'true'
         env:
           NEW_VERSION: ${{ steps.bump.outputs.version }}
         run: |
           git add package.json package-lock.json
           git commit -m "chore(release): ${NEW_VERSION} [skip ci]"
-          git tag "${NEW_VERSION}"
-          git push origin HEAD:main
-          git push origin "${NEW_VERSION}"
+
+      - name: Push bump commit (retry with rebase on race)
+        if: steps.skip_check.outputs.skip != 'true'
+        run: |
+          # Another push may land on main between our checkout and push.
+          # Rebase our single bump commit on top and retry a few times.
+          for attempt in 1 2 3 4 5; do
+            if git push origin HEAD:main; then
+              echo "Push succeeded on attempt ${attempt}."
+              exit 0
+            fi
+            echo "Push failed on attempt ${attempt}; pulling with rebase and retrying..."
+            git fetch origin main
+            git pull --rebase origin main
+          done
+          echo "Push failed after 5 attempts; aborting release."
+          exit 1
 
       - name: Publish to npm (OIDC trusted publisher, with provenance)
         if: steps.skip_check.outputs.skip != 'true'
@@ -101,7 +116,24 @@ jobs:
           # Prefers npm OIDC trusted publishing when configured on npmjs.com.
           # Falls back to NPM_TOKEN auth if a token is present in the env.
           # See: https://docs.npmjs.com/trusted-publishers
+          #
+          # Recovery note: if this step fails the bump commit is already
+          # on `main` but no tag is created and no GitHub Release is
+          # published. To recover, either (a) re-run this workflow after
+          # fixing the underlying issue — the next run will skip because
+          # the head commit is `chore(release):` — so instead (b)
+          # manually `npm publish` the already-bumped package and then
+          # `git tag <version> && git push origin <version>` plus a
+          # `gh release create <version> --generate-notes`.
           npm publish --access public --provenance
+
+      - name: Tag release (only after successful publish)
+        if: steps.skip_check.outputs.skip != 'true'
+        env:
+          NEW_VERSION: ${{ steps.bump.outputs.version }}
+        run: |
+          git tag "${NEW_VERSION}"
+          git push origin "${NEW_VERSION}"
 
       - name: Create GitHub Release
         if: steps.skip_check.outputs.skip != 'true'
