@@ -1,3 +1,14 @@
+/**
+ * Canonical list of adapter source identifiers. Kept narrow so the compiler
+ * flags typos like "signall" at the call site instead of at runtime.
+ */
+export const ADAPTER_SOURCES = ["imessage", "telegram", "whatsapp", "signal"] as const;
+export type AdapterSource = (typeof ADAPTER_SOURCES)[number];
+
+export function isAdapterSource(value: string): value is AdapterSource {
+  return (ADAPTER_SOURCES as readonly string[]).includes(value);
+}
+
 export interface NormalizedMessage {
   id: string;
   timestamp: Date;
@@ -17,7 +28,7 @@ export interface NormalizedAttachment {
 }
 
 export interface NormalizedConversation {
-  source: string;
+  source: AdapterSource;
   conversationId: string;
   title: string;
   participants: string[];
@@ -32,7 +43,7 @@ export interface NormalizedConversation {
 }
 
 export interface ExportAdapter {
-  source: string;
+  source: AdapterSource;
   loadConversations(options: Record<string, unknown>): Promise<NormalizedConversation[]>;
 }
 
@@ -82,7 +93,7 @@ export interface ChatFrontmatter {
   handles: string[];
   chatId?: number | string | null;
   service?: string | null;
-  source: string;
+  source: AdapterSource;
   messageCount: number;
   firstMessage: string;
   lastMessage: string;

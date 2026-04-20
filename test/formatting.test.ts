@@ -45,7 +45,7 @@ describe("renderConversationDays", () => {
     expect(content).toContain("attachments omitted");
   });
 
-  test.each(["imessage", "telegram", "whatsapp", "signal"])(
+  test.each(["imessage", "telegram", "whatsapp", "signal"] as const)(
     "writes flat <date>/<file>.md for %s (no source-name prefix)",
     (source) => {
       const conversation: NormalizedConversation = {
