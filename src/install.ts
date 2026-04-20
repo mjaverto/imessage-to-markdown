@@ -16,7 +16,7 @@ const DEFAULT_OUTPUT_DIR = path.join(os.homedir(), "brain", "inbox", "messages")
 const DEFAULT_DB = path.join(os.homedir(), "Library", "Messages", "chat.db");
 const LABEL = "ai.aver.to.imessage-to-markdown";
 
-function buildRunnerScript(configPath: string): string {
+export function buildRunnerScript(configPath: string): string {
   return `#!/bin/zsh
 set -euo pipefail
 # launchd runs agents with a minimal PATH that does not include node, jq,
@@ -117,7 +117,12 @@ EOF
 `;
 }
 
-function buildPlist(scriptPath: string, configPath: string, hour: number, minute: number): string {
+export function buildPlist(
+  scriptPath: string,
+  configPath: string,
+  hour: number,
+  minute: number,
+): string {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
