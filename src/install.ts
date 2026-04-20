@@ -281,12 +281,6 @@ async function resolveConfig(): Promise<AppConfig> {
       initial: cli.outputDir || DEFAULT_OUTPUT_DIR,
     },
     {
-      type: (prev, values) => (values.source === "imessage" ? null : "text"),
-      name: "exportPath",
-      message: "Where is the export file or directory for this source?",
-      initial: cli.exportPath || "~/Downloads/export",
-    },
-    {
       type: "text",
       name: "schedule",
       message: "What time should it run each day? (HH:MM)",
@@ -329,7 +323,7 @@ async function resolveConfig(): Promise<AppConfig> {
   return buildConfig({
     source: response.source || cli.source || "imessage",
     outputDir: response.outputDir || cli.outputDir || DEFAULT_OUTPUT_DIR,
-    exportPath: response.exportPath || cli.exportPath,
+    exportPath: cli.exportPath,
     schedule: response.schedule || cli.schedule,
     runQmdEmbed: Boolean(response.runQmdEmbed),
     qmdCommand: response.qmdCommand || cli.qmdCommand,
