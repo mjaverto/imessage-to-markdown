@@ -5,11 +5,10 @@
  * SQLCipher using the all-zeros test key) and test/fixtures/signal-config.json
  * (uses the legacy "key" field so no macOS Keychain is needed).
  */
-import fs from "node:fs";
-import os from "node:os";
+import { createRequire } from "node:module";
 import path from "node:path";
 
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test } from "vitest";
 
 import { signalAdapter, SignalDatabaseBusyError } from "../src/adapters/signal.js";
 import { TransientAdapterError } from "../src/core/model.js";
@@ -125,25 +124,71 @@ describe("SignalDatabaseBusyError", () => {
     expect(err.source).toBe("signal");
   });
 
-  test("DB-locked condition is mapped to SignalDatabaseBusyError", async () => {
-    // Create a temp copy of the signal DB path but make the copy step throw
-    // a "SQLITE_BUSY" style error. We do this by pointing at a path that
-    // exists (so the first existsSync check passes) but with a mocked
-    // openSignalDatabase that throws the right message.
-    let tmpDir: string | undefined;
-    try {
-      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "signal-lock-test-"));
-      // Write a small file so existsSync passes
-      const fakePath = path.join(tmpDir, "db.sqlite");
-      fs.copyFileSync(SIGNAL_DB, fakePath);
+  // Simulate the SQLCipher driver reporting `SQLITE_BUSY` at open time by
+  // poisoning the CommonJS require.cache for `better-sqlite3-multiple-ciphers`
+  // with a stub constructor. The adapter resolves the native module lazily via
+  // `createRequire(import.meta.url)`, so this real-module swap exercises the
+  // actual adapter code path — we ARE invoking `signalAdapter.loadConversations`,
+  // not just constructing the error class.
+  //
+  // Why not a real filesystem lock? The adapter copies the DB with
+  // `fs.copyFileSync` before opening, and on macOS/Linux that raw-bytes copy
+  // bypasses SQLite's advisory locks — so a sibling write transaction against
+  // the fixture cannot surface SQLITE_BUSY at the open site. The cache swap is
+  // the smallest change that still runs the adapter's error-mapping branch.
+  describe("BUSY from native SQLCipher driver", () => {
+    const req = createRequire(import.meta.url);
+    const nativePath = req.resolve("better-sqlite3-multiple-ciphers");
+    const original = req.cache[nativePath];
 
-      // We can't easily inject an error into the SQLCipher open, but we can
-      // verify the error type hierarchy is wired correctly.
-      const err = new SignalDatabaseBusyError("database is locked");
-      expect(err instanceof TransientAdapterError).toBe(true);
-      expect(err.message).toContain("locked");
-    } finally {
-      if (tmpDir) fs.rmSync(tmpDir, { recursive: true, force: true });
+    afterEach(() => {
+      if (original) req.cache[nativePath] = original;
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+      else delete req.cache[nativePath];
+    });
+
+    function installBusyStub(message: string): void {
+      function BusyDatabase(): void {
+        const err = new Error(message) as Error & { code?: string };
+        err.code = "SQLITE_BUSY";
+        throw err;
+      }
+      req.cache[nativePath] = {
+        id: nativePath,
+        path: path.dirname(nativePath),
+        filename: nativePath,
+        loaded: true,
+        exports: BusyDatabase,
+        children: [],
+        paths: [],
+        parent: null,
+        require: req,
+        isPreloading: false,
+      } as unknown as NodeJS.Module;
     }
+
+    test("SQLITE_BUSY on open is mapped to SignalDatabaseBusyError", async () => {
+      installBusyStub("SQLITE_BUSY: database is locked");
+
+      const promise = signalAdapter.loadConversations({
+        signalDbPath: SIGNAL_DB,
+        signalConfigPath: SIGNAL_CONFIG,
+      });
+
+      await expect(promise).rejects.toBeInstanceOf(SignalDatabaseBusyError);
+      await expect(promise).rejects.toBeInstanceOf(TransientAdapterError);
+      await expect(promise).rejects.toThrow(/locked/i);
+    });
+
+    test("non-BUSY errors are not remapped to SignalDatabaseBusyError", async () => {
+      installBusyStub("SQLITE_CORRUPT: database image is malformed");
+
+      await expect(
+        signalAdapter.loadConversations({
+          signalDbPath: SIGNAL_DB,
+          signalConfigPath: SIGNAL_CONFIG,
+        }),
+      ).rejects.not.toBeInstanceOf(SignalDatabaseBusyError);
+    });
   });
 });
