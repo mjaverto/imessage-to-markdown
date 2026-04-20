@@ -32,7 +32,9 @@ function makeClient(
       if (connectError) throw connectError;
     },
     async disconnect() {},
-    async getMe() { return { id: 0 }; },
+    async getMe() {
+      return { id: 0 };
+    },
     async *iterDialogs() {
       for (const dialog of dialogs) yield dialog;
     },
@@ -51,7 +53,10 @@ describe("telegram adapter — error paths", () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "tg-err-test-"));
-    fs.writeFileSync(path.join(tmpDir, "credentials.json"), JSON.stringify({ apiId: 1, apiHash: "abc123" }));
+    fs.writeFileSync(
+      path.join(tmpDir, "credentials.json"),
+      JSON.stringify({ apiId: 1, apiHash: "abc123" }),
+    );
     fs.writeFileSync(path.join(tmpDir, "session.txt"), "fake-session");
   });
 
@@ -85,7 +90,9 @@ describe("telegram adapter — error paths", () => {
   test("re-throws unknown connect errors as-is", async () => {
     const unknownErr = new Error("some network error");
     await expect(
-      loadTelegramConversations({ telegramConfigDir: tmpDir }, () => makeClient([], {}, unknownErr)),
+      loadTelegramConversations({ telegramConfigDir: tmpDir }, () =>
+        makeClient([], {}, unknownErr),
+      ),
     ).rejects.toThrow("some network error");
   });
 
@@ -117,9 +124,24 @@ describe("telegram adapter — error paths", () => {
 
     const dialogs: TelegramDialogLike[] = [{ id: 1, title: "Chat" }];
     const messages: TelegramMessageLike[] = [
-      { id: 1, date: Math.floor(new Date("2023-06-01T00:00:00Z").getTime() / 1000), message: "too old", out: false },
-      { id: 2, date: Math.floor(new Date("2024-06-01T00:00:00Z").getTime() / 1000), message: "in range", out: false },
-      { id: 3, date: Math.floor(new Date("2025-06-01T00:00:00Z").getTime() / 1000), message: "too new", out: false },
+      {
+        id: 1,
+        date: Math.floor(new Date("2023-06-01T00:00:00Z").getTime() / 1000),
+        message: "too old",
+        out: false,
+      },
+      {
+        id: 2,
+        date: Math.floor(new Date("2024-06-01T00:00:00Z").getTime() / 1000),
+        message: "in range",
+        out: false,
+      },
+      {
+        id: 3,
+        date: Math.floor(new Date("2025-06-01T00:00:00Z").getTime() / 1000),
+        message: "too new",
+        out: false,
+      },
     ];
 
     const conversations = await loadTelegramConversations(
@@ -144,9 +166,8 @@ describe("telegram adapter — error paths", () => {
       },
     ];
 
-    const conversations = await loadTelegramConversations(
-      { telegramConfigDir: tmpDir },
-      () => makeClient(dialogs, { "1": messages }),
+    const conversations = await loadTelegramConversations({ telegramConfigDir: tmpDir }, () =>
+      makeClient(dialogs, { "1": messages }),
     );
     expect(conversations[0]!.messages[0]!.sender).toBe("John Doe");
   });
@@ -163,9 +184,8 @@ describe("telegram adapter — error paths", () => {
       },
     ];
 
-    const conversations = await loadTelegramConversations(
-      { telegramConfigDir: tmpDir },
-      () => makeClient(dialogs, { "1": messages }),
+    const conversations = await loadTelegramConversations({ telegramConfigDir: tmpDir }, () =>
+      makeClient(dialogs, { "1": messages }),
     );
     expect(conversations[0]!.messages[0]!.sender).toBe("@johndoe");
   });
@@ -183,9 +203,8 @@ describe("telegram adapter — error paths", () => {
       },
     ];
 
-    const conversations = await loadTelegramConversations(
-      { telegramConfigDir: tmpDir },
-      () => makeClient(dialogs, { "1": messages }),
+    const conversations = await loadTelegramConversations({ telegramConfigDir: tmpDir }, () =>
+      makeClient(dialogs, { "1": messages }),
     );
     expect(conversations[0]!.messages[0]!.sender).toBe("9999");
   });
@@ -210,12 +229,15 @@ describe("telegram adapter — error paths", () => {
   test("dialogTitle uses name when title missing", async () => {
     const dialogs: TelegramDialogLike[] = [{ id: 42, name: "My Dialog", title: undefined }];
     const messages: TelegramMessageLike[] = [
-      { id: 1, date: Math.floor(new Date("2024-06-01T00:00:00Z").getTime() / 1000), message: "hello" },
+      {
+        id: 1,
+        date: Math.floor(new Date("2024-06-01T00:00:00Z").getTime() / 1000),
+        message: "hello",
+      },
     ];
 
-    const conversations = await loadTelegramConversations(
-      { telegramConfigDir: tmpDir },
-      () => makeClient(dialogs, { "42": messages }),
+    const conversations = await loadTelegramConversations({ telegramConfigDir: tmpDir }, () =>
+      makeClient(dialogs, { "42": messages }),
     );
     expect(conversations[0]!.title).toBe("My Dialog");
   });
@@ -232,9 +254,8 @@ describe("telegram adapter — error paths", () => {
       },
     ];
 
-    const conversations = await loadTelegramConversations(
-      { telegramConfigDir: tmpDir },
-      () => makeClient(dialogs, { "1": messages }),
+    const conversations = await loadTelegramConversations({ telegramConfigDir: tmpDir }, () =>
+      makeClient(dialogs, { "1": messages }),
     );
     expect(conversations[0]!.messages[0]!.text).toBe("fallback text");
   });

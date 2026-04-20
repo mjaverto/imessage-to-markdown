@@ -30,7 +30,7 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const nativeRequire = createRequire(import.meta.url);
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+
 const Database = nativeRequire("better-sqlite3-multiple-ciphers") as any;
 
 const FIXTURES_DIR = __dirname;
@@ -127,7 +127,9 @@ function generateImessage(): void {
   db.prepare("INSERT INTO chat_message_join VALUES (2,4)").run();
 
   // Attachment on message 1
-  db.prepare("INSERT INTO attachment VALUES (1,'~/Library/Messages/Attachments/img.jpg','image/jpeg')").run();
+  db.prepare(
+    "INSERT INTO attachment VALUES (1,'~/Library/Messages/Attachments/img.jpg','image/jpeg')",
+  ).run();
   db.prepare("INSERT INTO message_attachment_join VALUES (1,1)").run();
 
   db.close();
@@ -180,7 +182,9 @@ function generateWhatsapp(): void {
   // Chat 1: 1:1
   db.prepare("INSERT INTO ZWACHATSESSION VALUES (1,'15705551234@s.whatsapp.net','Alice',0)").run();
   // Chat 2: group
-  db.prepare("INSERT INTO ZWACHATSESSION VALUES (2,'111111111-222222222@g.us','Test Group',1)").run();
+  db.prepare(
+    "INSERT INTO ZWACHATSESSION VALUES (2,'111111111-222222222@g.us','Test Group',1)",
+  ).run();
 
   const d1 = toMacSeconds(new Date("2024-06-01T10:00:00Z"));
   const d2 = toMacSeconds(new Date("2024-06-01T10:05:00Z"));
@@ -188,17 +192,23 @@ function generateWhatsapp(): void {
   const d4 = toMacSeconds(new Date("2024-06-01T11:05:00Z"));
 
   // Messages in chat 1
-  db.prepare("INSERT INTO ZWAMESSAGE VALUES (1,1,?,0,'hi alice',NULL,'15705551234@s.whatsapp.net','Alice',NULL,NULL,0)").run(d1);
+  db.prepare(
+    "INSERT INTO ZWAMESSAGE VALUES (1,1,?,0,'hi alice',NULL,'15705551234@s.whatsapp.net','Alice',NULL,NULL,0)",
+  ).run(d1);
   db.prepare("INSERT INTO ZWAMESSAGE VALUES (2,1,?,1,'hello',NULL,NULL,NULL,NULL,NULL,0)").run(d2);
 
   // Group member
-  db.prepare("INSERT INTO ZWAGROUPMEMBER VALUES (1,'Bob Jones',NULL,'5559991111@s.whatsapp.net')").run();
+  db.prepare(
+    "INSERT INTO ZWAGROUPMEMBER VALUES (1,'Bob Jones',NULL,'5559991111@s.whatsapp.net')",
+  ).run();
   // Messages in chat 2
   db.prepare("INSERT INTO ZWAMESSAGE VALUES (3,2,?,0,'group msg',NULL,NULL,NULL,1,NULL,0)").run(d3);
   db.prepare("INSERT INTO ZWAMESSAGE VALUES (4,2,?,1,'reply',NULL,NULL,NULL,NULL,NULL,0)").run(d4);
 
   // Push names
-  db.prepare("INSERT INTO ZWAPROFILEPUSHNAME VALUES (1,'15705551234@s.whatsapp.net','Alice')").run();
+  db.prepare(
+    "INSERT INTO ZWAPROFILEPUSHNAME VALUES (1,'15705551234@s.whatsapp.net','Alice')",
+  ).run();
 
   db.close();
   console.log(`Generated: ${outPath} (${fs.statSync(outPath).size} bytes)`);
@@ -248,19 +258,43 @@ function generateSignal(): void {
   `);
 
   // Conversations
-  db.prepare("INSERT INTO conversations VALUES ('conv-1','Alice','Alice Wonderland','+15705551234','uuid-alice','private')").run();
-  db.prepare("INSERT INTO conversations VALUES ('conv-2','Work Group',NULL,NULL,'uuid-work','group')").run();
+  db.prepare(
+    "INSERT INTO conversations VALUES ('conv-1','Alice','Alice Wonderland','+15705551234','uuid-alice','private')",
+  ).run();
+  db.prepare(
+    "INSERT INTO conversations VALUES ('conv-2','Work Group',NULL,NULL,'uuid-work','group')",
+  ).run();
 
   // Messages
   const t1 = new Date("2024-06-01T10:00:00Z").getTime();
   const t2 = new Date("2024-06-01T10:05:00Z").getTime();
   const t3 = new Date("2024-06-01T11:00:00Z").getTime();
 
-  db.prepare("INSERT INTO messages VALUES ('msg-1','conv-1','+15705551234',?,?,?,?,0)").run(t1, t1, "hey there", "incoming");
-  db.prepare("INSERT INTO messages VALUES ('msg-2','conv-1',NULL,?,?,?,?,0)").run(t2, t2, "hello back", "outgoing");
-  db.prepare("INSERT INTO messages VALUES ('msg-3','conv-2','+15705551111',?,?,?,?,0)").run(t3, t3, "group message", "incoming");
+  db.prepare("INSERT INTO messages VALUES ('msg-1','conv-1','+15705551234',?,?,?,?,0)").run(
+    t1,
+    t1,
+    "hey there",
+    "incoming",
+  );
+  db.prepare("INSERT INTO messages VALUES ('msg-2','conv-1',NULL,?,?,?,?,0)").run(
+    t2,
+    t2,
+    "hello back",
+    "outgoing",
+  );
+  db.prepare("INSERT INTO messages VALUES ('msg-3','conv-2','+15705551111',?,?,?,?,0)").run(
+    t3,
+    t3,
+    "group message",
+    "incoming",
+  );
   // System message that should be filtered out (not incoming/outgoing)
-  db.prepare("INSERT INTO messages VALUES ('msg-4','conv-1',NULL,?,?,?,?,0)").run(t3, t3, "call started", "call-history");
+  db.prepare("INSERT INTO messages VALUES ('msg-4','conv-1',NULL,?,?,?,?,0)").run(
+    t3,
+    t3,
+    "call started",
+    "call-history",
+  );
 
   db.close();
 

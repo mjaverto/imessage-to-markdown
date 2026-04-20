@@ -81,14 +81,16 @@ describe("renderConversationDays — no-text messages", () => {
 
   test("renders attachment count when attachments array is present", () => {
     const convo = makeConvo({
-      messages: [makeMsg({
-        text: "check this",
-        hadAttachments: true,
-        attachments: [
-          { name: "photo.jpg", kind: "image" },
-          { name: "video.mp4", kind: "video" },
-        ],
-      })],
+      messages: [
+        makeMsg({
+          text: "check this",
+          hadAttachments: true,
+          attachments: [
+            { name: "photo.jpg", kind: "image" },
+            { name: "video.mp4", kind: "video" },
+          ],
+        }),
+      ],
     });
     const files = renderConversationDays(convo);
     expect(files[0]!.content).toContain("2 attachments omitted");
@@ -96,11 +98,13 @@ describe("renderConversationDays — no-text messages", () => {
 
   test("renders singular attachment count", () => {
     const convo = makeConvo({
-      messages: [makeMsg({
-        text: "look",
-        hadAttachments: true,
-        attachments: [{ name: "photo.jpg", kind: "image" }],
-      })],
+      messages: [
+        makeMsg({
+          text: "look",
+          hadAttachments: true,
+          attachments: [{ name: "photo.jpg", kind: "image" }],
+        }),
+      ],
     });
     const files = renderConversationDays(convo);
     expect(files[0]!.content).toContain("1 attachment omitted");

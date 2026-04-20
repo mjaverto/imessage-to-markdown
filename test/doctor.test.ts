@@ -113,7 +113,9 @@ describe("runDoctor", () => {
       dbPath: tmpDir,
       telegramConfigDir: tgDir,
     });
-    expect(result.warnings.find((w) => w.includes("Telegram config dir not found"))).toBeUndefined();
+    expect(
+      result.warnings.find((w) => w.includes("Telegram config dir not found")),
+    ).toBeUndefined();
   });
 
   test("warns when exportPath does not exist for unknown source", () => {

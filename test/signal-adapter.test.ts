@@ -9,7 +9,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { beforeEach, afterEach, describe, expect, test, vi } from "vitest";
+import { describe, expect, test } from "vitest";
 
 import { signalAdapter, SignalDatabaseBusyError } from "../src/adapters/signal.js";
 import { TransientAdapterError } from "../src/core/model.js";

@@ -5,7 +5,7 @@ on:
     branches: [main]
   push:
     branches: [main]
-    tags-ignore: ['**']
+    tags-ignore: ["**"]
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -25,17 +25,20 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
+          node-version: "20"
+          cache: "npm"
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Lint (typecheck)
+      - name: Lint
         run: npm run lint
 
       - name: Build
         run: npm run build
 
-      - name: Test
+      - name: Test (unit)
         run: npm test
+
+      - name: Test (E2E)
+        run: npm run test:e2e

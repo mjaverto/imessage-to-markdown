@@ -29,9 +29,9 @@ describe("exportFromSource", () => {
   });
 
   test("throws for unknown source", async () => {
-    await expect(
-      exportFromSource("unknown-source", { outputDir }),
-    ).rejects.toThrow(/unknown source/i);
+    await expect(exportFromSource("unknown-source", { outputDir })).rejects.toThrow(
+      /unknown source/i,
+    );
   });
 
   test("exports imessage fixture to markdown files", async () => {

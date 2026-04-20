@@ -24,9 +24,9 @@ describe("iMessageAdapter — fixture-based", () => {
     });
 
     expect(conversations.length).toBeGreaterThanOrEqual(1);
-    const oneToOne = conversations.find((c) =>
-      c.conversationId === "iMessage;-;+15705551234" ||
-      c.participants.includes("+15705551234"),
+    const oneToOne = conversations.find(
+      (c) =>
+        c.conversationId === "iMessage;-;+15705551234" || c.participants.includes("+15705551234"),
     );
     expect(oneToOne).toBeDefined();
     expect(oneToOne?.source).toBe("imessage");
@@ -68,7 +68,9 @@ describe("iMessageAdapter — fixture-based", () => {
     });
 
     // Find conversation with both directions
-    const conv = conversations.find((c) => c.messages.some((m) => m.isFromMe) && c.messages.some((m) => !m.isFromMe));
+    const conv = conversations.find(
+      (c) => c.messages.some((m) => m.isFromMe) && c.messages.some((m) => !m.isFromMe),
+    );
     expect(conv).toBeDefined();
     const fromMe = conv!.messages.find((m) => m.isFromMe);
     const notFromMe = conv!.messages.find((m) => !m.isFromMe);

@@ -68,10 +68,10 @@ describe("install file writing", () => {
     expect(script).toContain("#!/bin/zsh");
     expect(script).toContain(`CONFIG_PATH=${JSON.stringify(configPath)}`);
     expect(script).toContain("--source");
-    expect(script).toContain("source === \"imessage\"");
-    expect(script).toContain("source === \"telegram\"");
-    expect(script).toContain("source === \"whatsapp\"");
-    expect(script).toContain("source === \"signal\"");
+    expect(script).toContain('source === "imessage"');
+    expect(script).toContain('source === "telegram"');
+    expect(script).toContain('source === "whatsapp"');
+    expect(script).toContain('source === "signal"');
     // Exit code contract comments must be present
     expect(script).toContain("exit 75");
     expect(script).toContain("exit 78");
@@ -140,7 +140,12 @@ EOF
 
 const LABEL = "ai.aver.to.imessage-to-markdown";
 
-function buildPlistForTest(scriptPath: string, configPath: string, hour: number, minute: number): string {
+function buildPlistForTest(
+  scriptPath: string,
+  configPath: string,
+  hour: number,
+  minute: number,
+): string {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">

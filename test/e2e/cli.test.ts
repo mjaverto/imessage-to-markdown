@@ -7,7 +7,7 @@
  * Pre-requisite: `npm run build` must have been run before these tests.
  * The vitest globalSetup (vitest.config.ts) ensures this automatically.
  */
-import { execFileSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -23,7 +23,10 @@ const SIGNAL_DB = path.join(FIXTURES, "signal.db");
 const SIGNAL_CONFIG = path.join(FIXTURES, "signal-config.json");
 
 /** Run CLI and return { stdout, stderr, status }. Never throws. */
-function runCli(args: string[], env?: Record<string, string>): { stdout: string; stderr: string; status: number } {
+function runCli(
+  args: string[],
+  env?: Record<string, string>,
+): { stdout: string; stderr: string; status: number } {
   const result = spawnSync("node", [CLI, ...args], {
     encoding: "utf8",
     env: { ...process.env, ...env },
@@ -66,12 +69,18 @@ describe("CLI E2E — imessage export", () => {
 
   test("exports conversations from fixture with --source imessage", () => {
     const { stdout, status } = runCli([
-      "--source", "imessage",
-      "--db-path", IMESSAGE_DB,
-      "--output-dir", outputDir,
-      "--start", "2024-01-01",
-      "--end", "2025-01-01",
-      "--my-name", "Me",
+      "--source",
+      "imessage",
+      "--db-path",
+      IMESSAGE_DB,
+      "--output-dir",
+      outputDir,
+      "--start",
+      "2024-01-01",
+      "--end",
+      "2025-01-01",
+      "--my-name",
+      "Me",
       "--no-contacts",
     ]);
 
@@ -93,11 +102,16 @@ describe("CLI E2E — imessage export", () => {
   test("--start and --end date filtering works", () => {
     // No messages in 2020
     const { stdout, status } = runCli([
-      "--source", "imessage",
-      "--db-path", IMESSAGE_DB,
-      "--output-dir", outputDir,
-      "--start", "2020-01-01",
-      "--end", "2021-01-01",
+      "--source",
+      "imessage",
+      "--db-path",
+      IMESSAGE_DB,
+      "--output-dir",
+      outputDir,
+      "--start",
+      "2020-01-01",
+      "--end",
+      "2021-01-01",
       "--no-contacts",
     ]);
 
@@ -108,11 +122,16 @@ describe("CLI E2E — imessage export", () => {
 
   test("running twice overwrites existing files (no duplicates)", () => {
     const sharedArgs = [
-      "--source", "imessage",
-      "--db-path", IMESSAGE_DB,
-      "--output-dir", outputDir,
-      "--start", "2024-01-01",
-      "--end", "2025-01-01",
+      "--source",
+      "imessage",
+      "--db-path",
+      IMESSAGE_DB,
+      "--output-dir",
+      outputDir,
+      "--start",
+      "2024-01-01",
+      "--end",
+      "2025-01-01",
       "--no-contacts",
     ];
 
@@ -147,13 +166,20 @@ describe("CLI E2E — signal export", () => {
 
   test("exports conversations from fixture with --source signal", () => {
     const { stdout, status } = runCli([
-      "--source", "signal",
-      "--signal-db-path", SIGNAL_DB,
-      "--signal-config-path", SIGNAL_CONFIG,
-      "--output-dir", outputDir,
-      "--start", "2024-01-01",
-      "--end", "2025-01-01",
-      "--my-name", "Me",
+      "--source",
+      "signal",
+      "--signal-db-path",
+      SIGNAL_DB,
+      "--signal-config-path",
+      SIGNAL_CONFIG,
+      "--output-dir",
+      outputDir,
+      "--start",
+      "2024-01-01",
+      "--end",
+      "2025-01-01",
+      "--my-name",
+      "Me",
     ]);
 
     expect(status).toBe(0);
@@ -180,12 +206,18 @@ describe("CLI E2E — whatsapp export", () => {
 
   test("exports conversations from fixture with --source whatsapp", () => {
     const { stdout, status } = runCli([
-      "--source", "whatsapp",
-      "--whatsapp-db-path", WHATSAPP_DB,
-      "--output-dir", outputDir,
-      "--start", "2024-01-01",
-      "--end", "2025-01-01",
-      "--my-name", "Me",
+      "--source",
+      "whatsapp",
+      "--whatsapp-db-path",
+      WHATSAPP_DB,
+      "--output-dir",
+      outputDir,
+      "--start",
+      "2024-01-01",
+      "--end",
+      "2025-01-01",
+      "--my-name",
+      "Me",
       "--no-contacts",
     ]);
 
@@ -214,9 +246,12 @@ describe("CLI E2E — telegram error cases", () => {
   test("exits with code 78 when credentials are missing", () => {
     // No credentials.json in tmpDir
     const { status, stderr } = runCli([
-      "--source", "telegram",
-      "--telegram-config-dir", tmpDir,
-      "--output-dir", tmpDir,
+      "--source",
+      "telegram",
+      "--telegram-config-dir",
+      tmpDir,
+      "--output-dir",
+      tmpDir,
     ]);
 
     expect(status).toBe(78); // EX_CONFIG / PermanentAdapterError

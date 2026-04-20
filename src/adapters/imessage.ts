@@ -122,9 +122,7 @@ ORDER BY m.date ASC;
         maxBuffer: 1024 * 1024 * 1024,
       });
       const trimmed = output.trim();
-      const rows = trimmed
-        ? (JSON.parse(trimmed) as Record<string, string | number>[])
-        : [];
+      const rows = trimmed ? (JSON.parse(trimmed) as Record<string, string | number>[]) : [];
       const conversations = new Map<string, NormalizedConversation>();
       for (const row of rows) {
         const text =

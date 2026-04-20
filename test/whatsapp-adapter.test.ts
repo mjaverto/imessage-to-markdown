@@ -7,11 +7,9 @@
  *   - kindFromMediaPath
  *   - resolveSender branches
  */
-import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { describe, expect, test } from "vitest";
 
 import {
   macEpochToDate,
