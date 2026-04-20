@@ -56,10 +56,19 @@ function conversationTitle(row: ConversationRow): string {
 }
 
 function withReadableDbCopy<T>(dbPath: string, fn: (safeDbPath: string) => T): T {
-  // Copy the DB (and any WAL/SHM sidecars) to a temp dir so we never interact
-  // with a Signal process holding the file. Mirrors the pattern used by the
-  // iMessage adapter.
+  // Checkpoint-then-copy: we first issue `pragma wal_checkpoint(TRUNCATE)` on
+  // a short-lived reader so that whatever WAL contents existed are merged
+  // into the main DB file on disk. Then fs.copyFileSync of the main file
+  // (plus any residual WAL/SHM) is consistent in practice. A pure
+  // fs-copy without the checkpoint can race with a Signal checkpoint
+  // landing mid-copy and produce a snapshot SQLCipher rejects as malformed.
+  //
+  // We'd prefer `sqlcipher_export` into a plaintext ATTACH for a true
+  // atomic snapshot, but better-sqlite3-multiple-ciphers rejects the
+  // plaintext target with SQLITE_CANTOPEN; this is the closest robust
+  // alternative that doesn't require the sqlcipher CLI.
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "signal-export-"));
+  fs.chmodSync(tmpDir, 0o700);
   const safeDb = path.join(tmpDir, "db.sqlite");
   try {
     fs.copyFileSync(dbPath, safeDb);
@@ -82,7 +91,10 @@ type SignalDatabaseCtor = new (
   options?: { readonly?: boolean; fileMustExist?: boolean },
 ) => {
   pragma: (source: string, options?: { simple?: boolean }) => unknown;
-  prepare: (sql: string) => { all: (...params: unknown[]) => unknown[] };
+  prepare: (sql: string) => {
+    all: (...params: unknown[]) => unknown[];
+    run: (...params: unknown[]) => unknown;
+  };
   close: () => void;
 };
 

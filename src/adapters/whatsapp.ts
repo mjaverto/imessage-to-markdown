@@ -73,10 +73,29 @@ export function jidToHandle(raw: string | null | undefined): string {
 function copyDbForRead(dbPath: string): { safeDb: string; cleanup: () => void } {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "whatsapp-export-"));
   const safeDb = path.join(tmpDir, "ChatStorage.sqlite");
-  fs.copyFileSync(dbPath, safeDb);
-  for (const suffix of ["-wal", "-shm"]) {
-    const source = `${dbPath}${suffix}`;
-    if (fs.existsSync(source)) fs.copyFileSync(source, `${safeDb}${suffix}`);
+  // VACUUM INTO produces a point-in-time consistent snapshot even while
+  // WhatsApp Desktop is actively writing. A naive fs.copyFileSync of
+  // db + -wal + -shm can race: if a checkpoint lands between the copies,
+  // the snapshot contains a WAL that references pages the main DB doesn't
+  // have, and opening it throws "database disk image is malformed".
+  try {
+    execFileSync(
+      "sqlite3",
+      [dbPath, `VACUUM INTO '${safeDb.replace(/'/g, "''")}'`],
+      { stdio: ["ignore", "ignore", "pipe"] },
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (/locked|busy/i.test(message)) {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+      throw new TransientAdapterError(
+        `WhatsApp database at ${dbPath} is locked (${message}). ` +
+          `Quit WhatsApp Desktop or retry on the next scheduled tick.`,
+        "whatsapp",
+      );
+    }
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    throw error;
   }
   return {
     safeDb,
