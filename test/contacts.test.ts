@@ -114,12 +114,12 @@ describe("loadFromAddressBookSQLite", () => {
     buildAbcddbSource(path.join(dir, "AddressBook-v22.abcddb"), contacts);
   }
 
-  test("returns null when the sources dir does not exist", () => {
-    const result = loadFromAddressBookSQLite({ sourcesDir: path.join(tmpRoot, "nope") });
+  test("returns null when the sources dir does not exist", async () => {
+    const result = await loadFromAddressBookSQLite({ sourcesDir: path.join(tmpRoot, "nope") });
     expect(result).toBeNull();
   });
 
-  test("reads contacts from a single source and normalizes handles", () => {
+  test("reads contacts from a single source and normalizes handles", async () => {
     makeSource("A-UUID", [
       { firstName: "Tim", lastName: "Sharpe", phones: ["(912) 531-5244"], emails: ["Tim@Example.COM"] },
       { firstName: "Dan", lastName: "Pohlig", phones: ["+1 570-555-1234"] },
@@ -128,7 +128,7 @@ describe("loadFromAddressBookSQLite", () => {
       { phones: ["9999999999"] },
     ]);
 
-    const result = loadFromAddressBookSQLite({ sourcesDir: tmpRoot });
+    const result = await loadFromAddressBookSQLite({ sourcesDir: tmpRoot });
     expect(result).not.toBeNull();
     expect(result!.sourceCount).toBe(1);
     expect(result!.map.get("9125315244")).toBe("Tim Sharpe");
@@ -138,7 +138,7 @@ describe("loadFromAddressBookSQLite", () => {
     expect(result!.map.has("9999999999")).toBe(false);
   });
 
-  test("merges multiple sources deterministically (first writer wins, alphabetical source order)", () => {
+  test("merges multiple sources deterministically (first writer wins, alphabetical source order)", async () => {
     // 'A-source' is read first (alphabetical), so its value wins on conflicts.
     makeSource("A-source", [
       { firstName: "Alice", lastName: "Anderson", phones: ["+15705550001"] },
@@ -149,14 +149,14 @@ describe("loadFromAddressBookSQLite", () => {
       { firstName: "Bob", lastName: "Builder", emails: ["bob@example.com"] },
     ]);
 
-    const result = loadFromAddressBookSQLite({ sourcesDir: tmpRoot });
+    const result = await loadFromAddressBookSQLite({ sourcesDir: tmpRoot });
     expect(result).not.toBeNull();
     expect(result!.sourceCount).toBe(2);
     expect(result!.map.get("5705550001")).toBe("Alice Anderson");
     expect(result!.map.get("bob@example.com")).toBe("Bob Builder");
   });
 
-  test("falls back through firstname/lastname -> nickname -> organization", () => {
+  test("falls back through firstname/lastname -> nickname -> organization", async () => {
     makeSource("A", [
       { nickname: "Nick-only", phones: ["+15705550011"] },
       { organization: "Org-only Inc", emails: ["contact@org-only.example"] },
@@ -164,7 +164,7 @@ describe("loadFromAddressBookSQLite", () => {
       { lastName: "Last", phones: ["+15705550013"] },
     ]);
 
-    const result = loadFromAddressBookSQLite({ sourcesDir: tmpRoot });
+    const result = await loadFromAddressBookSQLite({ sourcesDir: tmpRoot });
     expect(result).not.toBeNull();
     expect(result!.map.get("5705550011")).toBe("Nick-only");
     expect(result!.map.get("contact@org-only.example")).toBe("Org-only Inc");
@@ -172,9 +172,9 @@ describe("loadFromAddressBookSQLite", () => {
     expect(result!.map.get("5705550013")).toBe("Last");
   });
 
-  test("returns null when no .abcddb files exist under any source", () => {
+  test("returns null when no .abcddb files exist under any source", async () => {
     fs.mkdirSync(path.join(tmpRoot, "empty-source"), { recursive: true });
-    const result = loadFromAddressBookSQLite({ sourcesDir: tmpRoot });
+    const result = await loadFromAddressBookSQLite({ sourcesDir: tmpRoot });
     expect(result).toBeNull();
   });
 });

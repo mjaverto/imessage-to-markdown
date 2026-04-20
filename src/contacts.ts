@@ -113,18 +113,31 @@ function displayNameFromRecord(first: string | null, last: string | null, nickna
 }
 
 /**
- * Copy a `.abcddb` file (plus any WAL/SHM sidecars) into a temp dir so we
- * can open it read-only without contending with the live Contacts.app
- * process. Mirrors the pattern used by the iMessage / Signal adapters.
+ * Snapshot a `.abcddb` file into a temp dir using SQLite's online backup
+ * API so we can read it without contending with the live Contacts.app
+ * process.
+ *
+ * Previously this used `fs.copyFileSync` for the main DB + each `-wal` /
+ * `-shm` sidecar separately, which is a TOCTOU race: the main file and
+ * its WAL can land at different points in Contacts.app's write cycle and
+ * produce a torn snapshot that opens but reads as `SQLITE_CORRUPT`.
+ *
+ * `db.backup(destPath)` uses SQLite's backup API to produce an atomic,
+ * point-in-time snapshot that always represents a consistent state.
  */
-function withReadableAbcddbCopy<T>(src: string, fn: (safeDbPath: string) => T): T {
+async function withReadableAbcddbCopy<T>(
+  src: string,
+  fn: (safeDbPath: string) => T,
+): Promise<T> {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "contacts-ab-"));
   const safeDb = path.join(tmpDir, "ab.abcddb");
   try {
-    fs.copyFileSync(src, safeDb);
-    for (const suffix of ["-wal", "-shm"]) {
-      const sidecar = `${src}${suffix}`;
-      if (fs.existsSync(sidecar)) fs.copyFileSync(sidecar, `${safeDb}${suffix}`);
+    const Database = nativeRequire("better-sqlite3-multiple-ciphers") as AbcdDatabaseCtor;
+    const sourceDb = new Database(src, { readonly: true, fileMustExist: true });
+    try {
+      await sourceDb.backup(safeDb);
+    } finally {
+      sourceDb.close();
     }
     return fn(safeDb);
   } finally {
@@ -144,6 +157,7 @@ type AbcdDatabaseCtor = new (
   prepare: (sql: string) => {
     all: (...params: unknown[]) => unknown[];
   };
+  backup: (destinationFile: string) => Promise<{ totalPages: number; remainingPages: number }>;
   close: () => void;
 };
 
@@ -178,7 +192,7 @@ interface EmailRow {
  * Normalization matches the JXA path: phones stripped to last 10 digits,
  * emails lowercased + trimmed.
  */
-function loadFromAbcddb(dbPath: string): ContactsMap {
+async function loadFromAbcddb(dbPath: string): Promise<ContactsMap> {
   const Database = nativeRequire("better-sqlite3-multiple-ciphers") as AbcdDatabaseCtor;
   const map: ContactsMap = new Map();
 
@@ -247,7 +261,9 @@ function mergeContactsMap(target: ContactsMap, source: ContactsMap): void {
  * never been opened on this Mac, or the user keeps contacts elsewhere),
  * which tells the caller to try the JXA fallback.
  */
-export function loadFromAddressBookSQLite(options: { sourcesDir?: string } = {}): { map: ContactsMap; sourceCount: number } | null {
+export async function loadFromAddressBookSQLite(
+  options: { sourcesDir?: string } = {},
+): Promise<{ map: ContactsMap; sourceCount: number } | null> {
   const sourcesDir = options.sourcesDir || defaultAddressBookSourcesDir();
   if (!fs.existsSync(sourcesDir)) return null;
 
@@ -269,7 +285,7 @@ export function loadFromAddressBookSQLite(options: { sourcesDir?: string } = {})
   let usedSources = 0;
   for (const dbPath of dbPaths) {
     try {
-      const perSource = loadFromAbcddb(dbPath);
+      const perSource = await loadFromAbcddb(dbPath);
       if (perSource.size > 0) {
         mergeContactsMap(merged, perSource);
         usedSources += 1;
@@ -343,7 +359,7 @@ export async function loadContactsMap(options: { timeoutMs?: number } = {}): Pro
 
   // Step 1: fast, permission-friendly SQLite path.
   try {
-    const result = loadFromAddressBookSQLite();
+    const result = await loadFromAddressBookSQLite();
     if (result && result.map.size > 0) {
       console.log(`[contacts] Loaded ${result.map.size} contacts from AddressBook SQLite (${result.sourceCount} sources).`);
       cached = result.map;
