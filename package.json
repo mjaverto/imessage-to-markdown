@@ -1,6 +1,6 @@
 {
   "name": "messaging-markdown-exporter",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Export iMessage, Telegram, WhatsApp, and Signal conversations into a shared markdown format",
   "repository": {
     "type": "git",
