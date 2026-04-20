@@ -8,7 +8,7 @@
     "imessage-to-markdown": "dist/cli.js"
   },
   "scripts": {
-    "build": "tsup src/cli.ts src/install.ts --format esm --dts --clean --out-dir dist",
+    "build": "tsup src/cli.ts src/install.ts --format esm --dts --clean --out-dir dist --external better-sqlite3-multiple-ciphers",
     "dev": "tsx src/cli.ts",
     "install:local": "tsx src/install.ts",
     "test": "vitest run",
@@ -29,8 +29,11 @@
   "author": "Mike Averto",
   "license": "MIT",
   "dependencies": {
+    "better-sqlite3-multiple-ciphers": "^12.9.0",
     "commander": "^14.0.1",
-    "prompts": "^2.4.2"
+    "input": "^1.0.1",
+    "prompts": "^2.4.2",
+    "telegram": "^2.26.22"
   },
   "devDependencies": {
     "@types/node": "^24.6.0",

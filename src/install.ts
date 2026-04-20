@@ -40,16 +40,78 @@ if (config.acPowerOnly) {
   }
 }
 process.chdir(config.repoDir);
-const args = ["dist/cli.js", "--source", config.source, "--output-dir", config.outputDir];
-if (config.source === "imessage") {
-  args.push("--db-path", config.dbPath, "--my-name", config.myName);
-  if (config.includeEmpty) args.push("--include-empty");
-} else if (config.exportPath) {
-  args.push("--export-path", config.exportPath);
+const sources = Array.isArray(config.enabledSources) && config.enabledSources.length > 0
+  ? config.enabledSources
+  : [config.source];
+// Exit-code contract with the CLI:
+//   0  = success (or no-op day with zero messages)
+//   75 = transient failure (DB locked, network blip) — keep going
+//   78 = permanent failure (auth revoked, config missing) — notify the user
+//   *  = unknown error — treat as permanent for safety
+let anyPermanent = false;
+let anyTransient = false;
+let successes = 0;
+const permanentSources = [];
+for (const source of sources) {
+  const sourceOutputDir = sources.length > 1 ? \`\${config.outputDir}/\${source}\` : config.outputDir;
+  const args = ["dist/cli.js", "--source", source, "--output-dir", sourceOutputDir, "--my-name", config.myName];
+  if (source === "imessage") {
+    args.push("--db-path", config.dbPath);
+    if (config.includeEmpty) args.push("--include-empty");
+  } else if (source === "telegram") {
+    if (config.telegramConfigDir) args.push("--telegram-config-dir", config.telegramConfigDir);
+  } else if (source === "whatsapp") {
+    if (config.whatsappDbPath) args.push("--whatsapp-db-path", config.whatsappDbPath);
+  } else if (source === "signal") {
+    if (config.signalDbPath) args.push("--signal-db-path", config.signalDbPath);
+    if (config.signalConfigPath) args.push("--signal-config-path", config.signalConfigPath);
+  } else if (config.exportPath) {
+    args.push("--export-path", config.exportPath);
+  }
+  try {
+    execFileSync("node", args, { stdio: "inherit" });
+    successes++;
+  } catch (err) {
+    const code = err && typeof err.status === "number" ? err.status : 1;
+    if (code === 75) {
+      anyTransient = true;
+      console.warn(\`[runner] \${source} transient failure (exit 75); will retry next tick\`);
+    } else {
+      anyPermanent = true;
+      permanentSources.push(source);
+      console.error(\`[runner] \${source} permanent failure (exit \${code}); user action required\`);
+    }
+  }
 }
-execFileSync("node", args, { stdio: "inherit" });
 if (config.runQmdEmbed && config.qmdCommand) {
-  execFileSync("bash", ["-lc", config.qmdCommand], { stdio: "inherit" });
+  // Skip qmd-embed if every adapter failed this tick. Otherwise
+  // qmd-embed would process leftover/stale markdown from prior runs
+  // and mask the underlying adapter failure.
+  if (successes === 0) {
+    console.warn("[runner] all adapters failed this tick; skipping qmd-embed");
+  } else {
+    try {
+      execFileSync("bash", ["-lc", config.qmdCommand], { stdio: "inherit" });
+    } catch (err) {
+      anyPermanent = true;
+      permanentSources.push("qmd-embed");
+      console.error(\`[runner] qmd-embed failed: \${err && err.message}\`);
+    }
+  }
+}
+if (anyPermanent) {
+  try {
+    const msg = \`imessage-to-markdown: \${permanentSources.join(", ")} need attention\`;
+    execFileSync("osascript", ["-e", \`display notification "\${msg}" with title "imessage-to-markdown"\`], { stdio: "ignore" });
+  } catch {
+    // osascript failure is non-fatal — the nonzero exit still surfaces via launchd
+  }
+  process.exit(1);
+}
+if (anyTransient) {
+  // Propagate the transient signal so launchd's error stream records it,
+  // but distinguish from permanent via the 75 exit code.
+  process.exit(75);
 }
 EOF
 `;
@@ -184,7 +246,11 @@ async function resolveConfig(): Promise<AppConfig> {
   }
 
   if (cli.doctor) {
-    const doctor = runDoctor(String(cli.source || "imessage"), expandHome(String(cli.dbPath || DEFAULT_DB)), cli.exportPath ? expandHome(String(cli.exportPath)) : undefined);
+    const doctor = runDoctor({
+      sources: [String(cli.source || "imessage")],
+      dbPath: expandHome(String(cli.dbPath || DEFAULT_DB)),
+      exportPath: cli.exportPath ? expandHome(String(cli.exportPath)) : undefined,
+    });
     for (const warning of doctor.warnings) console.log(`- ${warning}`);
   }
 
@@ -222,12 +288,6 @@ async function resolveConfig(): Promise<AppConfig> {
       name: "outputDir",
       message: "Where should exported markdown messages go?",
       initial: cli.outputDir || DEFAULT_OUTPUT_DIR,
-    },
-    {
-      type: (prev, values) => (values.source === "imessage" ? null : "text"),
-      name: "exportPath",
-      message: "Where is the export file or directory for this source?",
-      initial: cli.exportPath || "~/Downloads/export",
     },
     {
       type: "text",
@@ -272,7 +332,7 @@ async function resolveConfig(): Promise<AppConfig> {
   return buildConfig({
     source: response.source || cli.source || "imessage",
     outputDir: response.outputDir || cli.outputDir || DEFAULT_OUTPUT_DIR,
-    exportPath: response.exportPath || cli.exportPath,
+    exportPath: cli.exportPath,
     schedule: response.schedule || cli.schedule,
     runQmdEmbed: Boolean(response.runQmdEmbed),
     qmdCommand: response.qmdCommand || cli.qmdCommand,
@@ -286,7 +346,15 @@ async function resolveConfig(): Promise<AppConfig> {
 
 export async function main(): Promise<void> {
   const config = await resolveConfig();
-  const doctor = runDoctor(config.source, config.dbPath, config.exportPath);
+  const doctor = runDoctor({
+    sources: config.enabledSources && config.enabledSources.length > 0 ? config.enabledSources : [config.source],
+    dbPath: config.dbPath,
+    exportPath: config.exportPath,
+    whatsappDbPath: config.whatsappDbPath,
+    signalDbPath: config.signalDbPath,
+    signalConfigPath: config.signalConfigPath,
+    telegramConfigDir: config.telegramConfigDir,
+  });
   for (const warning of doctor.warnings) console.log(`- ${warning}`);
   const { plistPath, configPath } = writeInstallFiles(config);
   loadLaunchAgent(plistPath);
