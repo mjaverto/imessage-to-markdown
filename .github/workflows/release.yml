@@ -3,6 +3,14 @@ name: Release
 on:
   push:
     branches: [main]
+    # Don't burn a publish + provenance signature on doc-only commits.
+    # Workflow changes still publish (kept out of the ignore list) so
+    # that CI fixes ship immediately instead of waiting for code change.
+    paths-ignore:
+      - "README.md"
+      - "docs/**"
+      - "**/*.md"
+      - ".github/ISSUE_TEMPLATE/**"
 
 concurrency:
   group: release-${{ github.ref }}
