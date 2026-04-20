@@ -22,13 +22,14 @@ export async function exportFromSource(source: string, options: Record<string, u
   const outputDir = String(options.outputDir || "./exports");
   const conversations = await adapter.loadConversations(options);
 
-  // Contacts.app integration: only attempted for the iMessage source (where
-  // raw handles are phone numbers / emails), and only when the caller has
-  // not explicitly opted out. On non-Mac systems or when access is denied,
-  // loadContactsMap logs a warning and returns an empty map -- the export
-  // falls back to raw handles in that case.
+  // Contacts.app integration: attempted for sources whose raw handles are
+  // phone numbers / emails (iMessage, Signal, WhatsApp), and only when the
+  // caller has not explicitly opted out. On non-Mac systems or when access
+  // is denied, loadContactsMap logs a warning and returns an empty map --
+  // the export falls back to raw handles in that case.
   const useContacts = options.useContacts !== false;
-  const contacts: ContactsMap | undefined = useContacts && source === "imessage"
+  const contactsCapableSources = new Set(["imessage", "signal", "whatsapp"]);
+  const contacts: ContactsMap | undefined = useContacts && contactsCapableSources.has(source)
     ? await loadContactsMap()
     : undefined;
   const useContactNames = Boolean(options.useContactNames);
