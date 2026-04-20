@@ -4,12 +4,16 @@ Export conversations from multiple messaging apps into a shared markdown format.
 
 ## Supported sources
 
+All four adapters now read native, live data sources — no manual exports
+required. Each one is fully passive and safe to run unattended from
+`launchd`/`cron`.
+
 | Source | Input |
 |---|---|
-| `imessage` | macOS `chat.db` |
-| `telegram` | Telegram Desktop JSON export |
-| `whatsapp` | exported WhatsApp `.txt` chat logs |
-| `signal` | Signal markdown exports from tools like `signal-export` |
+| `imessage` | macOS `~/Library/Messages/chat.db` |
+| `signal` | encrypted SQLCipher DB at `~/Library/Application Support/Signal/sql/db.sqlite` (key auto-extracted from Keychain) |
+| `whatsapp` | macOS Group Container `ChatStorage.sqlite` (plain SQLite) |
+| `telegram` | live MTProto via `gramjs`, persistent `StringSession` for unattended runs |
 
 ## Architecture
 
@@ -56,32 +60,85 @@ node dist/cli.js \
   --output-dir ~/brain/iMessage
 ```
 
-### Telegram
+### Signal
 
 ```bash
 node dist/cli.js \
-  --source telegram \
-  --export-path ~/Downloads/telegram-export/result.json \
-  --output-dir ~/brain/messages
+  --source signal \
+  --output-dir ~/brain/Signal \
+  --my-name "Mike Averto"
+# Optional: override DB path
+#   --signal-db-path "$HOME/Library/Application Support/Signal/sql/db.sqlite"
 ```
+
+The Signal adapter:
+- Reads the encrypted SQLCipher DB directly using
+  `better-sqlite3-multiple-ciphers` (PRAGMA `cipher='sqlcipher'`, `legacy=4`).
+- Auto-extracts the SQLCipher passphrase from the macOS Keychain entry
+  `Signal Safe Storage` and decrypts the `encryptedKey` blob in
+  `config.json` using Chromium's safeStorage scheme (PBKDF2-HMAC-SHA1,
+  salt `saltysalt`, 1003 iterations, AES-128-CBC, IV = 16 spaces).
+- Falls back to the legacy plaintext `key` field if present.
+- **Sonoma 14.5+ caveat:** the Keychain entry can be regenerated after a
+  Signal Desktop upgrade and may prompt for the calling tool's keychain
+  access on first run. See
+  [carderne/signal-export#133](https://github.com/carderne/signal-export/issues/133)
+  for context. If the prompt is denied or the entry is missing, the
+  adapter exits nonzero with an actionable message.
 
 ### WhatsApp
 
 ```bash
 node dist/cli.js \
   --source whatsapp \
-  --export-path ~/Downloads/_chat.txt \
-  --output-dir ~/brain/messages
+  --output-dir ~/brain/WhatsApp \
+  --my-name "Mike Averto"
+# Optional: override DB path
+#   --whatsapp-db-path "$HOME/Library/Group Containers/group.net.whatsapp.WhatsApp.shared/ChatStorage.sqlite"
 ```
 
-### Signal
+The WhatsApp adapter:
+- Reads `ChatStorage.sqlite` from the WhatsApp Desktop (Catalyst) Group
+  Container — plain SQLite, no decryption needed.
+- Copies the live DB (plus `-wal` / `-shm`) to a temp file before opening
+  it read-only, to avoid lock conflicts with the running app.
+- Resolves senders via `ZWAPROFILEPUSHNAME` (then via macOS Contacts when
+  enabled), and converts the Mac/Cocoa epoch (`ZMESSAGEDATE`) to JS Date.
+- **Permission requirements:** WhatsApp Desktop must be installed and
+  signed in. The binary running this tool needs Full Disk Access (System
+  Settings → Privacy & Security → Full Disk Access) so the sandboxed
+  Group Container is readable.
+
+### Telegram
 
 ```bash
+# One-time interactive setup:
+node dist/cli.js telegram-login
+# (You'll be prompted for apiId, apiHash, phone, login code, optional 2FA pw.)
+
+# Then daily passive runs (cron-friendly):
 node dist/cli.js \
-  --source signal \
-  --export-path ~/signal-chats \
-  --output-dir ~/brain/messages
+  --source telegram \
+  --output-dir ~/brain/Telegram \
+  --my-name "Mike Averto"
 ```
+
+The Telegram adapter:
+- Uses MTProto via the `telegram` npm package (gramjs) with a persistent
+  `StringSession` blob, so cron jobs reuse the same login.
+- Stores credentials and session at
+  `~/.config/imessage-to-markdown/telegram/{credentials.json,session.txt}`
+  (`chmod 600`).
+- Per-dialog read cursor at
+  `~/.config/imessage-to-markdown/telegram/cursors.json` so each run
+  picks up where the last left off.
+- On `AUTH_KEY_UNREGISTERED` exits 0 with a loud warning (don't loop —
+  user must re-run `telegram-login`).
+- FloodWait-aware: catches `FloodWaitError`, sleeps `err.seconds`, retries
+  once, otherwise saves partial progress and exits 0.
+
+You'll need an `apiId`/`apiHash` from
+[my.telegram.org/apps](https://my.telegram.org/apps).
 
 ## Contacts integration (iMessage)
 
@@ -140,7 +197,7 @@ Interactive:
 npm run install:local
 ```
 
-Non-interactive example:
+Non-interactive example (single source):
 
 ```bash
 node dist/install.js \
@@ -150,6 +207,24 @@ node dist/install.js \
   --schedule 05:30 \
   --ac-power-only
 ```
+
+Multi-source runner — a single launchd job iterates over each source
+back-to-back:
+
+```bash
+node dist/install.js \
+  --enabled-sources imessage,signal,whatsapp,telegram \
+  --yes \
+  --output-dir "$HOME/brain" \
+  --schedule 05:30 \
+  --ac-power-only \
+  --my-name "Mike Averto"
+```
+
+Each source writes to its own subdir under `--output-dir` (e.g.
+`<output-dir>/imessage/...`, `<output-dir>/signal/...`, etc.). Sources
+with their own state (Telegram session, Signal Keychain entry) must be
+set up before the cron job runs unattended.
 
 Doctor mode:
 
@@ -166,21 +241,23 @@ node dist/install.js --uninstall
 ## Source-specific notes
 
 ### iMessage
-- still the strongest adapter
-- uses direct `chat.db` reads
+- direct `chat.db` reads via `sqlite3`
 - attributed-body cleanup is heuristic, not perfect
 
-### Telegram
-- designed for Telegram Desktop JSON exports
-- best when fed clean exported chat history
+### Signal
+- direct SQLCipher reads of the live Signal Desktop DB
+- key auto-extracted from macOS Keychain (Sonoma 14.5+ caveat above)
+- attachments referenced by count only; bodies skipped for v1
 
 ### WhatsApp
-- designed for exported text logs
-- backup/database parsing is future work
+- direct ChatStorage.sqlite reads from the macOS Group Container
+- requires Full Disk Access; group chats resolved via ZWAGROUPMEMBER
+- attachment metadata included; media bodies skipped for v1
 
-### Signal
-- designed to ingest exported markdown
-- best paired with an external exporter like `carderne/signal-export`
+### Telegram
+- live MTProto via gramjs with persistent StringSession
+- per-dialog cursors so daily runs are incremental
+- one-time interactive `telegram-login` subcommand for setup
 
 ## Development
 
